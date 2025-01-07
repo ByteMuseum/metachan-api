@@ -4,7 +4,7 @@ BINARY_BUILD_PATH=bin/$(BINARY_NAME)
 MAIN_PATH=metachan/main.go
 ENV_FILE=.env
 
-.PHONY: all build clean dev run setup
+.PHONY: all build clean dev build_run setup run
 
 setup:
 	@echo "Setting up environment..."
@@ -27,13 +27,17 @@ dev:
 	@echo "Running with air in development mode..."
 	air
 
-run:
-	@echo "Checking if binary exists..."
-	@if [ ! -f $(BINARY_BUILD_PATH) ]; then \
-		make build; \
-	fi
+build_run:
+	@echo "Cleaning up..."
+	rm -rf bin
+	@echo "Building binary..."
+	go build -o $(BINARY_BUILD_PATH) $(MAIN_PATH)
 	@echo "Running binary..."
 	$(BINARY_BUILD_PATH)
+
+run:
+	@echo "Running binary..."
+	go run $(MAIN_PATH)
 
 all: clean setup build
 	@echo "Build complete!"

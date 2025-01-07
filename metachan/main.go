@@ -1,9 +1,9 @@
 package main
 
 import (
-	"metachan-api/sync"
+	"metachan-api/syncutil"
 )
 
 func main() {
-	sync.StartSync()
+	syncutil.Sync()
 }

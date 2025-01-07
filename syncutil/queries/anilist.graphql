@@ -1,0 +1,342 @@
+query GetAnimeByID($id: Int) {
+  Media(id: $id) {
+    id
+    idMal
+    title {
+      romaji
+      english
+      native
+      userPreferred
+    }
+    type
+    format
+    status
+    description
+    startDate {
+      year
+      month
+      day
+    }
+    endDate {
+      year
+      month
+      day
+    }
+    season
+    seasonYear
+    episodes
+    duration
+    chapters
+    volumes
+    countryOfOrigin
+    isLicensed
+    source
+    hashtag
+    trailer {
+      id
+      site
+      thumbnail
+    }
+    updatedAt
+    coverImage {
+      extraLarge
+      large
+      medium
+      color
+    }
+    bannerImage
+    genres
+    synonyms
+    averageScore
+    meanScore
+    popularity
+    isLocked
+    trending
+    favourites
+    tags {
+      id
+      name
+      description
+      category
+      rank
+      isGeneralSpoiler
+      isMediaSpoiler
+      isAdult
+    }
+    relations {
+      edges {
+        id
+        relationType
+        node {
+          id
+          idMal
+          title {
+            romaji
+            english
+            native
+          }
+          type
+          format
+          status
+          description
+          startDate {
+            year
+            month
+            day
+          }
+          endDate {
+            year
+            month
+            day
+          }
+          season
+          seasonYear
+          episodes
+          duration
+          chapters
+          volumes
+          countryOfOrigin
+          isLicensed
+          source
+          hashtag
+          trailer {
+            id
+            site
+            thumbnail
+          }
+          updatedAt
+          coverImage {
+            extraLarge
+            large
+            medium
+            color
+          }
+          bannerImage
+          genres
+          synonyms
+          averageScore
+          meanScore
+          popularity
+          isLocked
+          trending
+          favourites
+          tags {
+            id
+            name
+            description
+            category
+            rank
+            isGeneralSpoiler
+            isMediaSpoiler
+            isAdult
+          }
+        }
+      }
+    }
+    characters(sort: ROLE) {
+      edges {
+        id
+        role
+        node {
+          id
+          name {
+            full
+            native
+          }
+          image {
+            large
+            medium
+          }
+          description
+          gender
+          dateOfBirth {
+            year
+            month
+            day
+          }
+          age
+          bloodType
+          favourites
+        }
+        voiceActors {
+          id
+          name {
+            full
+            native
+          }
+          languageV2
+          image {
+            large
+            medium
+          }
+          primaryOccupations
+          dateOfBirth {
+            year
+            month
+            day
+          }
+          age
+          yearsActive
+          homeTown
+          bloodType
+          favourites
+        }
+      }
+    }
+    staff {
+      edges {
+        id
+        role
+        node {
+          id
+          name {
+            full
+            native
+          }
+          languageV2
+          image {
+            large
+            medium
+          }
+          primaryOccupations
+          dateOfBirth {
+            year
+            month
+            day
+          }
+          age
+          yearsActive
+          homeTown
+          bloodType
+          favourites
+        }
+      }
+    }
+    studios {
+      edges {
+        id
+        isMain
+        node {
+          id
+          name
+          isAnimationStudio
+          siteUrl
+          favourites
+        }
+      }
+    }
+    externalLinks {
+      id
+      url
+      site
+      type
+      language
+      color
+      icon
+    }
+    rankings {
+      id
+      rank
+      type
+      format
+      year
+      season
+      allTime
+      context
+    }
+    recommendations {
+      edges {
+        node {
+          id
+          rating
+          mediaRecommendation {
+            id
+            title {
+              romaji
+              english
+              native
+            }
+            format
+            type
+            status
+            description
+            startDate {
+              year
+              month
+              day
+            }
+            endDate {
+              year
+              month
+              day
+            }
+            season
+            seasonYear
+            episodes
+            duration
+            chapters
+            volumes
+            countryOfOrigin
+            isLicensed
+            source
+            hashtag
+            trailer {
+              id
+              site
+              thumbnail
+            }
+            updatedAt
+            coverImage {
+              extraLarge
+              large
+              medium
+              color
+            }
+            bannerImage
+            genres
+            synonyms
+            averageScore
+            meanScore
+            popularity
+            isLocked
+            trending
+            favourites
+            tags {
+              id
+              name
+              description
+              category
+              rank
+              isGeneralSpoiler
+              isMediaSpoiler
+              isAdult
+            }
+          }
+        }
+      }
+    }
+    stats {
+      scoreDistribution {
+        score
+        amount
+      }
+      statusDistribution {
+        status
+        amount
+      }
+    }
+    isAdult
+    trends {
+      edges {
+        node {
+          date
+          trending
+          popularity
+          inProgress
+          releasing
+          episode
+        }
+      }
+    }
+  }
+}
