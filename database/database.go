@@ -53,33 +53,9 @@ func cleanDatabaseIfDebug(db *gorm.DB) {
 
 func migrateSchema(db *gorm.DB) {
 	logger.Debugf("AutoMigrating Database ...")
-	baseModels := []interface{}{
-		&AnimeGenre{},
-		&AnimeStaff{},
-		&AnimeCharacter{},
-		&AnimeStudio{},
-		&AnimeTag{},
-		&Anime{},
-		&CharacterVoiceActor{}, // Add this line to explicitly include the join table
-	}
-	dependentModels := []interface{}{
-		&AnimeStaffJoin{},
-		&AnimeGenreJoin{},
-		&AnimeCharacterJoin{},
-		&AnimeStudioJoin{},
-		&AnimeTagJoin{},
-		&AnimeMapping{},
-		&AnimeTitle{},
-		&AnimeExternalLink{},
-	}
-
-	// Remove the SetupJoinTable call
-
+	baseModels := []interface{}{&Anime{}, &AnimeCharacter{}, &AnimeStaff{}, &AnimeVoiceActor{}, &AnimeStudio{}, &AnimeTag{}, &AnimeGenre{}, &AnimeExternalLink{}}
 	if err := db.AutoMigrate(baseModels...); err != nil {
 		logger.Fatalf("Base tables migration failed: %v", err)
-	}
-	if err := db.AutoMigrate(dependentModels...); err != nil {
-		logger.Fatalf("Dependent tables migration failed: %v", err)
 	}
 	logger.Infof("Database Migration Complete")
 }

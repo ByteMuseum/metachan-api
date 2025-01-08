@@ -16,8 +16,8 @@ import (
 	"metachan-api/database"
 	"metachan-api/utils/log"
 
+	"github.com/lib/pq"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 //go:embed queries/anilist.graphql
@@ -32,7 +32,7 @@ const (
 
 const (
 	maxRetries            = 500
-	baseRetryDelaySeconds = 60
+	baseRetryDelaySeconds = 30
 	maxRetryDelaySeconds  = 600
 	jitterFactor          = 0.1
 )
@@ -166,6 +166,12 @@ func processMappings(mappings []*fribbMapping, client *http.Client, limiter *adv
 			statsMutex.Lock()
 			stats.processed++
 
+			// testing: stop processing after 20 mappings
+			if stats.processed >= 20 {
+				statsMutex.Unlock()
+				return
+			}
+
 			// Progress logging
 			if stats.processed%syncBatchSize == 0 {
 				logger.Infof("Progress: %d/%d processed", stats.processed, len(validMappings))
@@ -226,6 +232,18 @@ func processMapping(mapping *fribbMapping, client *http.Client) error {
 
 		if err := processStaff(tx, media.Staff, anime.ID); err != nil {
 			return fmt.Errorf("process staff failed: %w", err)
+		}
+
+		if err := processGenres(tx, media.Genres, anime.ID); err != nil {
+			return fmt.Errorf("process genres failed: %w", err)
+		}
+
+		if err := processStudios(tx, media.Studios.Edges, anime.ID); err != nil {
+			return fmt.Errorf("process studios failed: %w", err)
+		}
+
+		if err := processTags(tx, media.Tags, anime.ID); err != nil {
+			return fmt.Errorf("process tags failed: %w", err)
 		}
 
 		return nil
@@ -337,17 +355,17 @@ func buildAnimeModel(media *anilistMedia, mapping *fribbMapping) database.Anime 
 	}
 }
 
-func buildTitles(title anilistName) []database.AnimeTitle {
-	return []database.AnimeTitle{
-		{Type: database.Primary, Title: title.UserPreferred},
-		{Type: database.English, Title: title.English},
-		{Type: database.Native, Title: title.Native},
-		{Type: database.Alternative, Title: title.Romaji},
+func buildTitles(title anilistName) database.AnilistName {
+	return database.AnilistName{
+		Romaji:        title.Romaji,
+		English:       title.English,
+		Native:        title.Native,
+		UserPreferred: title.UserPreferred,
 	}
 }
 
-func buildMappings(mapping *fribbMapping, malID int) []database.AnimeMapping {
-	return []database.AnimeMapping{{
+func buildMappings(mapping *fribbMapping, malID int) database.AnimeMapping {
+	return database.AnimeMapping{
 		AniDB:       mapping.AniDB,
 		Anilist:     mapping.Anilist,
 		AnimePlanet: mapping.AnimePlanet,
@@ -358,7 +376,7 @@ func buildMappings(mapping *fribbMapping, malID int) []database.AnimeMapping {
 		NotifyMoe:   mapping.NotifyMoe,
 		TheMovieDB:  mapping.TMDB.value,
 		TheTVDB:     mapping.TVDB,
-	}}
+	}
 }
 
 func buildFormats(format, frisbeeType string) database.AnimeFormats {
@@ -469,183 +487,240 @@ func convertSource(source string) database.AnilistAnimeSource {
 	return database.AnilistSourceOriginal
 }
 
-func processCharacters(tx *gorm.DB, chars anilistCharacterConnection, animeID uint) error {
-	for _, edge := range chars.Edges {
-		char := buildCharacter(edge.Node)
-		if err := createOrUpdateCharacter(tx, &char); err != nil {
-			return err
+func processCharacters(tx *gorm.DB, characters anilistCharacterConnection, animeID uint) error {
+	for _, char := range characters.Edges {
+		character := database.AnimeCharacter{
+			Name: database.AnilistName{
+				Romaji:        char.Node.Name.Romaji,
+				English:       char.Node.Name.English,
+				Native:        char.Node.Name.Native,
+				UserPreferred: char.Node.Name.UserPreferred,
+			},
+			Role: char.Role,
+			Image: database.AnilistImage{
+				ExtraLarge: char.Node.Image.ExtraLarge,
+				Large:      char.Node.Image.Large,
+				Medium:     char.Node.Image.Medium,
+			},
+			Description: char.Node.Description,
+			Gender:      char.Node.Gender,
+			DateOfBirth: database.Date{
+				Year:  char.Node.DateOfBirth.Year,
+				Month: char.Node.DateOfBirth.Month,
+				Day:   char.Node.DateOfBirth.Day,
+			},
+			Age:       char.Node.Age,
+			BloodType: char.Node.BloodType,
 		}
 
-		if err := linkCharacterToAnime(tx, char.ID, animeID, edge.Role); err != nil {
-			return err
+		var existingChar database.AnimeCharacter
+		if err := tx.Where(&database.AnimeCharacter{
+			Name: character.Name,
+		}).FirstOrCreate(&existingChar, character).Error; err != nil {
+			return fmt.Errorf("find or create character failed: %w", err)
 		}
 
-		if err := processVoiceActors(tx, edge.VoiceActors, char.ID); err != nil {
-			return err
+		// Process voice actors
+		if err := processVoiceActors(tx, char.VoiceActors, existingChar.ID); err != nil {
+			return fmt.Errorf("process voice actors failed: %w", err)
+		}
+
+		// Use GORM's default naming convention for the junction table
+		if err := tx.Exec("INSERT INTO anime_to_characters (anime_id, anime_character_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+			animeID, existingChar.ID).Error; err != nil {
+			return fmt.Errorf("associate character with anime failed: %w", err)
 		}
 	}
+
 	return nil
 }
 
-func processStaff(tx *gorm.DB, staff anilistStaffConnection, animeID uint) error {
-	for _, edge := range staff.Edges {
-		staffMember := buildStaffMember(edge.Node)
-		if err := createOrUpdateStaff(tx, &staffMember); err != nil {
-			return err
-		}
-
-		if err := linkStaffToAnime(tx, staffMember.ID, animeID, edge.Role); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func processVoiceActors(tx *gorm.DB, actors []anilistStaff, charID uint) error {
-	for _, va := range actors {
-		staff := buildStaffMember(anilistStaff(va))
-		if err := createOrUpdateStaff(tx, &staff); err != nil {
-			return err
-		}
-
-		if err := linkVoiceActorToCharacter(tx, staff.ID, charID, va.LanguageV2); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func buildCharacter(node anilistCharacter) database.AnimeCharacter {
-	return database.AnimeCharacter{
-		Name:        convertName(node.Name),
-		Image:       convertImage(node.Image),
-		Description: node.Description,
-		Gender:      node.Gender,
-		DateOfBirth: convertDate(node.DateOfBirth),
-		BloodType:   node.BloodType,
-	}
-}
-
-func buildStaffMember(node anilistStaff) database.AnimeStaff {
-	return database.AnimeStaff{
-		Name:               convertName(node.Name),
-		Language:           node.LanguageV2,
-		Image:              convertImage(node.Image),
-		Description:        node.Description,
-		PrimaryOccupations: node.PrimaryOccupations,
-		DateOfBirth:        convertDate(node.DateOfBirth),
-		DateOfDeath:        convertDate(node.DateOfDeath),
-		Age:                node.Age,
-		YearsActive:        convertToInt64Array(node.YearsActive),
-		HomeTown:           node.HomeTown,
-		BloodType:          node.BloodType,
-		AnilistFavourites:  node.Favourites,
-	}
-}
-
-func convertName(name anilistName) database.AnilistName {
-	return database.AnilistName{
-		Romaji:        name.Romaji,
-		English:       name.English,
-		Native:        name.Native,
-		UserPreferred: name.UserPreferred,
-	}
-}
-
-func convertToInt64Array(input []int) []int64 {
+func convertToInt64Array(input []int) pq.Int64Array {
 	result := make([]int64, len(input))
 	for i, v := range input {
 		result[i] = int64(v)
 	}
-	return result
+	return pq.Int64Array(result)
 }
 
-func createOrUpdateCharacter(tx *gorm.DB, char *database.AnimeCharacter) error {
-	// Use raw SQL to query the nested JSON field
-	query := `
-        SELECT id FROM anime_characters 
-        WHERE 
-            (name->>'native' = ? OR name->>'romaji' = ? OR name->>'english' = ? OR name->>'user_preferred' = ?)
-    `
-	var existingID uint
-	err := tx.Raw(query,
-		char.Name.Native,
-		char.Name.Romaji,
-		char.Name.English,
-		char.Name.UserPreferred,
-	).Scan(&existingID).Error
+func processVoiceActors(tx *gorm.DB, voiceActors []anilistStaff, characterID uint) error {
+	for _, va := range voiceActors {
+		voiceActor := database.AnimeVoiceActor{
+			Name: database.AnilistName{
+				Romaji:        va.Name.Romaji,
+				English:       va.Name.English,
+				Native:        va.Name.Native,
+				UserPreferred: va.Name.UserPreferred,
+			},
+			Language: va.LanguageV2,
+			Image: database.AnilistImage{
+				ExtraLarge: va.Image.ExtraLarge,
+				Large:      va.Image.Large,
+				Medium:     va.Image.Medium,
+			},
+			Description:        va.Description,
+			PrimaryOccupations: va.PrimaryOccupations,
+			DateOfBirth: database.Date{
+				Year:  va.DateOfBirth.Year,
+				Month: va.DateOfBirth.Month,
+				Day:   va.DateOfBirth.Day,
+			},
+			DateOfDeath: database.Date{
+				Year:  va.DateOfDeath.Year,
+				Month: va.DateOfDeath.Month,
+				Day:   va.DateOfDeath.Day,
+			},
+			YearsActive:       convertToInt64Array(va.YearsActive),
+			HomeTown:          va.HomeTown,
+			BloodType:         va.BloodType,
+			AnilistFavourites: va.Favourites,
+		}
 
-	if err == nil && existingID != 0 {
-		char.ID = existingID
-		return nil
+		var existingVA database.AnimeVoiceActor
+		if err := tx.Where(&database.AnimeVoiceActor{
+			Name: voiceActor.Name,
+		}).FirstOrCreate(&existingVA, voiceActor).Error; err != nil {
+			return fmt.Errorf("find or create voice actor failed: %w", err)
+		}
+
+		// Use GORM's default naming convention for the junction table
+		if err := tx.Exec("INSERT INTO character_to_voice_actors (anime_character_id, anime_voice_actor_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+			characterID, existingVA.ID).Error; err != nil {
+			return fmt.Errorf("associate voice actor with character failed: %w", err)
+		}
 	}
 
-	if err != nil && err != gorm.ErrRecordNotFound {
-		return fmt.Errorf("character lookup failed: %w", err)
-	}
-
-	return tx.Create(char).Error
+	return nil
 }
 
-func createOrUpdateStaff(tx *gorm.DB, staff *database.AnimeStaff) error {
-	// Use raw SQL to query the nested JSON field
-	query := `
-        SELECT id FROM anime_staffs 
-        WHERE 
-            (name->>'native' = ? OR name->>'romaji' = ? OR name->>'english' = ? OR name->>'user_preferred' = ?)
-    `
-	var existingID uint
-	err := tx.Raw(query,
-		staff.Name.Native,
-		staff.Name.Romaji,
-		staff.Name.English,
-		staff.Name.UserPreferred,
-	).Scan(&existingID).Error
+func processStaff(tx *gorm.DB, staff anilistStaffConnection, animeID uint) error {
+	for _, s := range staff.Edges {
+		staffMember := database.AnimeStaff{
+			Name: database.AnilistName{
+				Romaji:        s.Node.Name.Romaji,
+				English:       s.Node.Name.English,
+				Native:        s.Node.Name.Native,
+				UserPreferred: s.Node.Name.UserPreferred,
+			},
+			Role:     s.Role,
+			Language: s.Node.LanguageV2,
+			Image: database.AnilistImage{
+				ExtraLarge: s.Node.Image.ExtraLarge,
+				Large:      s.Node.Image.Large,
+				Medium:     s.Node.Image.Medium,
+			},
+			Description:        s.Node.Description,
+			PrimaryOccupations: s.Node.PrimaryOccupations,
+			DateOfBirth: database.Date{
+				Year:  s.Node.DateOfBirth.Year,
+				Month: s.Node.DateOfBirth.Month,
+				Day:   s.Node.DateOfBirth.Day,
+			},
+			DateOfDeath: database.Date{
+				Year:  s.Node.DateOfDeath.Year,
+				Month: s.Node.DateOfDeath.Month,
+				Day:   s.Node.DateOfDeath.Day,
+			},
+			Age:               s.Node.Age,
+			YearsActive:       convertToInt64Array(s.Node.YearsActive),
+			HomeTown:          s.Node.HomeTown,
+			BloodType:         s.Node.BloodType,
+			AnilistFavourites: s.Node.Favourites,
+		}
 
-	if err == nil && existingID != 0 {
-		staff.ID = existingID
-		return nil
+		// Find or create staff member
+		var existingStaff database.AnimeStaff
+		if err := tx.Where(&database.AnimeStaff{
+			Name: staffMember.Name,
+		}).FirstOrCreate(&existingStaff, staffMember).Error; err != nil {
+			return fmt.Errorf("find or create staff member failed: %w", err)
+		}
+
+		// Use GORM's column naming convention
+		if err := tx.Exec("INSERT INTO anime_to_staff (anime_id, anime_staff_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+			animeID, existingStaff.ID).Error; err != nil {
+			return fmt.Errorf("associate staff with anime failed: %w", err)
+		}
 	}
 
-	if err != nil && err != gorm.ErrRecordNotFound {
-		return fmt.Errorf("staff lookup failed: %w", err)
-	}
-
-	return tx.Create(staff).Error
+	return nil
 }
 
-func linkCharacterToAnime(tx *gorm.DB, charID, animeID uint, role string) error {
-	characterJoin := database.AnimeCharacterJoin{
-		AnimeID:          animeID,
-		AnimeCharacterID: charID,
-		Role:             role,
+func processGenres(tx *gorm.DB, genres []string, animeID uint) error {
+	for _, genreName := range genres {
+		genre := database.AnimeGenre{
+			Name: genreName,
+		}
+
+		// Find or create genre
+		var existingGenre database.AnimeGenre
+		if err := tx.Where(&database.AnimeGenre{
+			Name: genre.Name,
+		}).FirstOrCreate(&existingGenre, genre).Error; err != nil {
+			return fmt.Errorf("find or create genre failed: %w", err)
+		}
+
+		// Associate genre with anime using many-to-many relationship
+		if err := tx.Exec("INSERT INTO anime_to_genres (anime_id, anime_genre_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+			animeID, existingGenre.ID).Error; err != nil {
+			return fmt.Errorf("associate genre with anime failed: %w", err)
+		}
 	}
-	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "anime_id"}, {Name: "anime_character_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"role"}),
-	}).Create(&characterJoin).Error
+
+	return nil
 }
 
-func linkStaffToAnime(tx *gorm.DB, staffID, animeID uint, role string) error {
-	staffJoin := database.AnimeStaffJoin{
-		AnimeID:      animeID,
-		AnimeStaffID: staffID,
-		Role:         role,
+func processStudios(tx *gorm.DB, studios []anilistStudioEdge, animeID uint) error {
+	for _, s := range studios {
+		studio := database.AnimeStudio{
+			Name:              s.Node.Name,
+			IsAnimationStudio: s.Node.IsAnimationStudio,
+			SiteURL:           s.Node.SiteURL,
+			AnilistFavourites: s.Node.Favourites,
+		}
+
+		// Find or create studio
+		var existingStudio database.AnimeStudio
+		if err := tx.Where(&database.AnimeStudio{
+			Name: studio.Name,
+		}).FirstOrCreate(&existingStudio, studio).Error; err != nil {
+			return fmt.Errorf("find or create studio failed: %w", err)
+		}
+
+		// Associate studio with anime using many-to-many relationship
+		if err := tx.Exec("INSERT INTO anime_to_studios (anime_id, anime_studio_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+			animeID, existingStudio.ID).Error; err != nil {
+			return fmt.Errorf("associate studio with anime failed: %w", err)
+		}
 	}
-	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "anime_id"}, {Name: "anime_staff_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"role"}),
-	}).Create(&staffJoin).Error
+
+	return nil
 }
 
-func linkVoiceActorToCharacter(tx *gorm.DB, actorID, charID uint, language string) error {
-	voiceActor := database.CharacterVoiceActor{
-		CharacterID:  charID,
-		VoiceActorID: actorID,
-		Language:     language,
+func processTags(tx *gorm.DB, tags []anilistTag, animeID uint) error {
+	for _, t := range tags {
+		tag := database.AnimeTag{
+			Name:        t.Name,
+			Description: t.Description,
+			Category:    t.Category,
+			Rank:        t.Rank,
+			IsAdult:     t.IsAdult,
+		}
+
+		// Find or create tag
+		var existingTag database.AnimeTag
+		if err := tx.Where(&database.AnimeTag{
+			Name: tag.Name,
+		}).FirstOrCreate(&existingTag, tag).Error; err != nil {
+			return fmt.Errorf("find or create tag failed: %w", err)
+		}
+
+		// Associate tag with anime using many-to-many relationship
+		if err := tx.Exec("INSERT INTO anime_to_tags (anime_id, anime_tag_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+			animeID, existingTag.ID).Error; err != nil {
+			return fmt.Errorf("associate tag with anime failed: %w", err)
+		}
 	}
-	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "character_id"}, {Name: "voice_actor_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"language"}),
-	}).Create(&voiceActor).Error
+
+	return nil
 }

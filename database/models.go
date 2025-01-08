@@ -1,19 +1,16 @@
 package database
 
 import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/lib/pq"
 )
 
 type BaseModel struct {
-	ID        uint       `json:"id"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
-	DeletedAt *time.Time `json:"deletedAt,omitempty" gorm:"index"`
+	ID        uint       `json:"-"`
+	CreatedAt time.Time  `json:"-"`
+	UpdatedAt time.Time  `json:"-"`
+	DeletedAt *time.Time `json:"-" gorm:"index"`
 }
 
 type AnilistAnimeFormat string
@@ -91,54 +88,10 @@ type AnilistName struct {
 	UserPreferred string `json:"userPreferred" gorm:"column:user_preferred"`
 }
 
-func (n AnilistName) Value() (driver.Value, error) {
-	return json.Marshal(n)
-}
-
-func (n *AnilistName) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-
-	var bytes []byte
-	switch v := value.(type) {
-	case []byte:
-		bytes = v
-	case string:
-		bytes = []byte(v)
-	default:
-		return fmt.Errorf("unsupported type for AnilistName: %T", value)
-	}
-
-	return json.Unmarshal(bytes, n)
-}
-
 type AnilistImage struct {
 	ExtraLarge string `json:"extraLarge" gorm:"column:extra_large"`
 	Large      string `json:"large" gorm:"column:large"`
 	Medium     string `json:"medium" gorm:"column:medium"`
-}
-
-func (i AnilistImage) Value() (driver.Value, error) {
-	return json.Marshal(i)
-}
-
-func (i *AnilistImage) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-
-	var bytes []byte
-	switch v := value.(type) {
-	case []byte:
-		bytes = v
-	case string:
-		bytes = []byte(v)
-	default:
-		return fmt.Errorf("unsupported type for AnilistImage: %T", value)
-	}
-
-	return json.Unmarshal(bytes, i)
 }
 
 type AnimeFormats struct {
@@ -158,47 +111,54 @@ type AnimeScores struct {
 	AnilistScores AnilistAnimeScores `json:"anilist" gorm:"embedded;prefix:anilist_"`
 }
 
+type AnimeMapping struct {
+	AniDB       int    `json:"anidb,omitempty"`
+	Anilist     int    `json:"anilist,omitempty"`
+	AnimePlanet string `json:"animePlanet,omitempty"`
+	AniSearch   int    `json:"aniSearch,omitempty"`
+	Kitsu       int    `json:"kitsu,omitempty"`
+	LiveChart   int    `json:"liveChart,omitempty"`
+	MyAnimeList int    `json:"myAnimeList,omitempty"`
+	NotifyMoe   string `json:"notifyMoe,omitempty"`
+	TheMovieDB  int    `json:"theMovieDB,omitempty"`
+	TheTVDB     int    `json:"theTVDB,omitempty"`
+}
+
 type Anime struct {
 	BaseModel
-	Titles          []AnimeTitle         `json:"titles" gorm:"foreignKey:AnimeID"`
-	Mappings        []AnimeMapping       `json:"mappings" gorm:"foreignKey:AnimeID"`
-	Formats         AnimeFormats         `json:"formats" gorm:"embedded"`
-	StartDate       Date                 `json:"startDate" gorm:"embedded;prefix:start_"`
-	EndDate         Date                 `json:"endDate" gorm:"embedded;prefix:end_"`
-	Status          AnimeStatus          `json:"status"`
-	Description     string               `json:"description" gorm:"type:text"`
-	Season          AnimeSeason          `json:"season"`
-	SeasonYear      int                  `json:"seasonYear"`
-	Duration        int                  `json:"duration"`
-	CountryOfOrigin string               `json:"countryOfOrigin"`
-	Source          AnilistAnimeSource   `json:"source"`
-	Hashtag         string               `json:"hashtag"`
-	CoverImage      AnilistImage         `json:"coverImage" gorm:"type:jsonb"`
-	BannerImage     string               `json:"bannerImage"`
-	Color           string               `json:"color"`
-	Synonyms        pq.StringArray       `json:"synonyms" gorm:"type:text[]"`
-	Scores          AnimeScores          `json:"scores" gorm:"embedded"`
-	Characters      []AnimeCharacterJoin `json:"-" gorm:"foreignKey:AnimeID"`
-	Staff           []AnimeStaffJoin     `json:"-" gorm:"foreignKey:AnimeID"`
-	Genres          []AnimeGenreJoin     `json:"-" gorm:"foreignKey:AnimeID"`
-	Studios         []AnimeStudioJoin    `json:"-" gorm:"foreignKey:AnimeID"`
-	Tags            []AnimeTagJoin       `json:"-" gorm:"foreignKey:AnimeID"`
-	ExternalLinks   []AnimeExternalLink  `json:"externalLinks" gorm:"foreignKey:AnimeID"`
-	IsAdult         bool                 `json:"isAdult"`
+	Titles          AnilistName         `json:"titles" gorm:"embedded;prefix:title_"`
+	Mappings        AnimeMapping        `json:"mappings" gorm:"embedded;prefix:mappings_"`
+	Formats         AnimeFormats        `json:"formats" gorm:"embedded"`
+	StartDate       Date                `json:"startDate" gorm:"embedded;prefix:start_"`
+	EndDate         Date                `json:"endDate" gorm:"embedded;prefix:end_"`
+	Status          AnimeStatus         `json:"status"`
+	Description     string              `json:"description" gorm:"type:text"`
+	Season          AnimeSeason         `json:"season"`
+	SeasonYear      int                 `json:"seasonYear"`
+	Duration        int                 `json:"duration"`
+	CountryOfOrigin string              `json:"countryOfOrigin"`
+	Source          AnilistAnimeSource  `json:"source"`
+	Hashtag         string              `json:"hashtag"`
+	CoverImage      AnilistImage        `json:"coverImage" gorm:"embedded;prefix:cover_"`
+	BannerImage     string              `json:"bannerImage"`
+	Color           string              `json:"color"`
+	Synonyms        pq.StringArray      `json:"synonyms" gorm:"type:text[]"`
+	Scores          AnimeScores         `json:"scores" gorm:"embedded;prefix:score_"`
+	Characters      []AnimeCharacter    `json:"characters" gorm:"many2many:anime_to_characters;joinForeignKey:anime_id;joinReferences:anime_character_id"`
+	Staff           []AnimeStaff        `json:"staff" gorm:"many2many:anime_to_staff;joinForeignKey:anime_id;joinReferences:anime_staff_id"`
+	Genres          []AnimeGenre        `json:"genres" gorm:"many2many:anime_to_genres;joinForeignKey:anime_id;joinReferences:anime_genre_id"`
+	Studios         []AnimeStudio       `json:"studios" gorm:"many2many:anime_to_studios;joinForeignKey:anime_id;joinReferences:anime_studio_id"`
+	Tags            []AnimeTag          `json:"tags" gorm:"many2many:anime_to_tags;joinForeignKey:anime_id;joinReferences:anime_tag_id"`
+	ExternalLinks   []AnimeExternalLink `json:"externalLinks" gorm:"foreignKey:AnimeID"`
+	IsAdult         bool                `json:"isAdult"`
 }
 
 type AnimeStudio struct {
 	BaseModel
-	Name              string            `json:"name"`
-	IsAnimationStudio bool              `json:"isAnimationStudio"`
-	SiteURL           string            `json:"siteURL"`
-	AnilistFavourites int               `json:"anilistFavourites"`
-	Animes            []AnimeStudioJoin `json:"-" gorm:"foreignKey:AnimeStudioID"`
-}
-
-type AnimeStudioJoin struct {
-	AnimeID       uint `gorm:"primaryKey"`
-	AnimeStudioID uint `gorm:"primaryKey"`
+	Name              string `json:"name"`
+	IsAnimationStudio bool   `json:"isAnimationStudio"`
+	SiteURL           string `json:"siteURL"`
+	AnilistFavourites int    `json:"anilistFavourites"`
 }
 
 type AnimeExternalLink struct {
@@ -214,101 +174,60 @@ type AnimeExternalLink struct {
 
 type AnimeTag struct {
 	BaseModel
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Category    string         `json:"category"`
-	Rank        int            `json:"rank"`
-	IsAdult     bool           `json:"isAdult"`
-	Animes      []AnimeTagJoin `json:"-" gorm:"foreignKey:AnimeTagID"`
-}
-
-type AnimeTagJoin struct {
-	AnimeID    uint `gorm:"primaryKey"`
-	AnimeTagID uint `gorm:"primaryKey"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	Rank        int    `json:"rank"`
+	IsAdult     bool   `json:"isAdult"`
 }
 
 type AnimeCharacter struct {
 	BaseModel
-	Name        AnilistName          `json:"name" gorm:"type:jsonb"`
-	Image       AnilistImage         `json:"image" gorm:"type:jsonb"`
-	Description string               `json:"description" gorm:"type:text"`
-	Gender      string               `json:"gender"`
-	DateOfBirth Date                 `json:"dateOfBirth" gorm:"embedded;prefix:birth_"`
-	Age         int                  `json:"age"`
-	BloodType   string               `json:"bloodType"`
-	VoiceActors []AnimeStaff         `json:"voiceActors" gorm:"many2many:character_voice_actors;foreignKey:ID;references:ID"`
-	Animes      []AnimeCharacterJoin `json:"-" gorm:"foreignKey:AnimeCharacterID"`
+	Name        AnilistName       `json:"name" gorm:"embedded;predix:name_"`
+	Role        string            `json:"role"`
+	Image       AnilistImage      `json:"image" gorm:"embedded;prefix:image_"`
+	Description string            `json:"description" gorm:"type:text"`
+	Gender      string            `json:"gender"`
+	DateOfBirth Date              `json:"dateOfBirth" gorm:"embedded;prefix:birth_"`
+	Age         string            `json:"age"`
+	BloodType   string            `json:"bloodType"`
+	VoiceActors []AnimeVoiceActor `json:"voiceActors" gorm:"many2many:character_to_voice_actors"`
 }
 
 type AnimeStaff struct {
 	BaseModel
-	Name               AnilistName      `json:"name" gorm:"type:jsonb"`
-	Language           string           `json:"language"`
-	Image              AnilistImage     `json:"image" gorm:"type:jsonb"`
-	Description        string           `json:"description" gorm:"type:text"`
-	PrimaryOccupations pq.StringArray   `json:"primaryOccupations" gorm:"type:text[]"`
-	DateOfBirth        Date             `json:"dateOfBirth" gorm:"embedded;prefix:birth_"`
-	DateOfDeath        Date             `json:"dateOfDeath" gorm:"embedded;prefix:death_"`
-	Age                int              `json:"age"`
-	YearsActive        pq.Int64Array    `json:"yearsActive" gorm:"type:integer[]"`
-	HomeTown           string           `json:"homeTown"`
-	BloodType          string           `json:"bloodType"`
-	AnilistFavourites  int              `json:"anilistFavourites"`
-	VoicedCharacters   []AnimeCharacter `json:"voicedCharacters" gorm:"many2many:character_voice_actors;foreignKey:ID;references:ID"`
-	Animes             []AnimeStaffJoin `json:"-" gorm:"foreignKey:AnimeStaffID"`
+	Name               AnilistName    `json:"name" gorm:"embedded;predix:name_"`
+	Role               string         `json:"role"`
+	Language           string         `json:"language"`
+	Image              AnilistImage   `json:"image" gorm:"embedded;prefix:image_"`
+	Description        string         `json:"description" gorm:"type:text"`
+	PrimaryOccupations pq.StringArray `json:"primaryOccupations" gorm:"type:text[]"`
+	DateOfBirth        Date           `json:"dateOfBirth" gorm:"embedded;prefix:birth_"`
+	DateOfDeath        Date           `json:"dateOfDeath" gorm:"embedded;prefix:death_"`
+	Age                int            `json:"age"`
+	YearsActive        pq.Int64Array  `json:"yearsActive" gorm:"type:integer[]"`
+	HomeTown           string         `json:"homeTown"`
+	BloodType          string         `json:"bloodType"`
+	AnilistFavourites  int            `json:"anilistFavourites"`
 }
 
-type AnimeCharacterJoin struct {
-	AnimeID          uint `gorm:"primaryKey"`
-	AnimeCharacterID uint `gorm:"primaryKey"`
-	Role             string
-}
-
-type AnimeStaffJoin struct {
-	AnimeID      uint `gorm:"primaryKey"`
-	AnimeStaffID uint `gorm:"primaryKey"`
-	Role         string
+type AnimeVoiceActor struct {
+	BaseModel
+	Name               AnilistName    `json:"name" gorm:"embedded;predix:name_"`
+	Language           string         `json:"language"`
+	Image              AnilistImage   `json:"image" gorm:"embedded;prefix:image_"`
+	Description        string         `json:"description" gorm:"type:text"`
+	PrimaryOccupations pq.StringArray `json:"primaryOccupations" gorm:"type:text[]"`
+	DateOfBirth        Date           `json:"dateOfBirth" gorm:"embedded;prefix:birth_"`
+	DateOfDeath        Date           `json:"dateOfDeath" gorm:"embedded;prefix:death_"`
+	Age                int            `json:"age"`
+	YearsActive        pq.Int64Array  `json:"yearsActive" gorm:"type:integer[]"`
+	HomeTown           string         `json:"homeTown"`
+	BloodType          string         `json:"bloodType"`
+	AnilistFavourites  int            `json:"anilistFavourites"`
 }
 
 type AnimeGenre struct {
 	BaseModel
-	Name   string           `json:"name" gorm:"type:varchar(100);uniqueIndex"`
-	Animes []AnimeGenreJoin `json:"-" gorm:"foreignKey:AnimeGenreID"`
-}
-
-type AnimeGenreJoin struct {
-	AnimeID      uint `gorm:"primaryKey"`
-	AnimeGenreID uint `gorm:"primaryKey"`
-}
-
-type AnimeMapping struct {
-	BaseModel
-	AnimeID     uint   `json:"-"`
-	AniDB       int    `json:"anidb,omitempty"`
-	Anilist     int    `json:"anilist,omitempty"`
-	AnimePlanet string `json:"animePlanet,omitempty"`
-	AniSearch   int    `json:"aniSearch,omitempty"`
-	Kitsu       int    `json:"kitsu,omitempty"`
-	LiveChart   int    `json:"liveChart,omitempty"`
-	MyAnimeList int    `json:"myAnimeList,omitempty"`
-	NotifyMoe   string `json:"notifyMoe,omitempty"`
-	TheMovieDB  int    `json:"theMovieDB,omitempty"`
-	TheTVDB     int    `json:"theTVDB,omitempty"`
-}
-
-type AnimeTitle struct {
-	BaseModel
-	AnimeID uint      `json:"-"`
-	Type    TitleType `json:"type"`
-	Title   string    `json:"title"`
-}
-
-type CharacterVoiceActor struct {
-	CharacterID  uint `gorm:"primaryKey"`
-	VoiceActorID uint `gorm:"primaryKey"`
-	Language     string
-}
-
-func (CharacterVoiceActor) TableName() string {
-	return "character_voice_actors"
+	Name string `json:"name" gorm:"type:varchar(100);uniqueIndex"`
 }

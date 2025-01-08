@@ -16,6 +16,7 @@ type Configuration struct {
 		Enabled              bool
 		CleanDatabaseOnStart bool
 	}
+	Port int
 }
 
 var Config = &Configuration{
@@ -28,6 +29,7 @@ var Config = &Configuration{
 		Enabled:              false,
 		CleanDatabaseOnStart: false,
 	},
+	Port: 3000,
 }
 
 var logLevels = map[string]int{
