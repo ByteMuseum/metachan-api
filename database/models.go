@@ -126,31 +126,35 @@ type AnimeMapping struct {
 
 type Anime struct {
 	BaseModel
-	Titles          AnilistName         `json:"titles" gorm:"embedded;prefix:title_"`
-	Mappings        AnimeMapping        `json:"mappings" gorm:"embedded;prefix:mappings_"`
-	Formats         AnimeFormats        `json:"formats" gorm:"embedded"`
-	StartDate       Date                `json:"startDate" gorm:"embedded;prefix:start_"`
-	EndDate         Date                `json:"endDate" gorm:"embedded;prefix:end_"`
-	Status          AnimeStatus         `json:"status"`
-	Description     string              `json:"description" gorm:"type:text"`
-	Season          AnimeSeason         `json:"season"`
-	SeasonYear      int                 `json:"seasonYear"`
-	Duration        int                 `json:"duration"`
-	CountryOfOrigin string              `json:"countryOfOrigin"`
-	Source          AnilistAnimeSource  `json:"source"`
-	Hashtag         string              `json:"hashtag"`
-	CoverImage      AnilistImage        `json:"coverImage" gorm:"embedded;prefix:cover_"`
-	BannerImage     string              `json:"bannerImage"`
-	Color           string              `json:"color"`
-	Synonyms        pq.StringArray      `json:"synonyms" gorm:"type:text[]"`
-	Scores          AnimeScores         `json:"scores" gorm:"embedded;prefix:score_"`
-	Characters      []AnimeCharacter    `json:"characters" gorm:"many2many:anime_to_characters;joinForeignKey:anime_id;joinReferences:anime_character_id"`
-	Staff           []AnimeStaff        `json:"staff" gorm:"many2many:anime_to_staff;joinForeignKey:anime_id;joinReferences:anime_staff_id"`
-	Genres          []AnimeGenre        `json:"genres" gorm:"many2many:anime_to_genres;joinForeignKey:anime_id;joinReferences:anime_genre_id"`
-	Studios         []AnimeStudio       `json:"studios" gorm:"many2many:anime_to_studios;joinForeignKey:anime_id;joinReferences:anime_studio_id"`
-	Tags            []AnimeTag          `json:"tags" gorm:"many2many:anime_to_tags;joinForeignKey:anime_id;joinReferences:anime_tag_id"`
-	ExternalLinks   []AnimeExternalLink `json:"externalLinks" gorm:"foreignKey:AnimeID"`
-	IsAdult         bool                `json:"isAdult"`
+	Titles                AnilistName           `json:"titles" gorm:"embedded;prefix:title_"`
+	Mappings              AnimeMapping          `json:"mappings" gorm:"embedded;prefix:mappings_"`
+	Formats               AnimeFormats          `json:"formats" gorm:"embedded"`
+	StartDate             Date                  `json:"startDate" gorm:"embedded;prefix:start_"`
+	EndDate               Date                  `json:"endDate" gorm:"embedded;prefix:end_"`
+	Status                AnimeStatus           `json:"status"`
+	Description           string                `json:"description" gorm:"type:text"`
+	Season                AnimeSeason           `json:"season"`
+	SeasonYear            int                   `json:"seasonYear"`
+	Duration              int                   `json:"duration"`
+	CountryOfOrigin       string                `json:"countryOfOrigin"`
+	Source                AnilistAnimeSource    `json:"source"`
+	Hashtag               string                `json:"hashtag"`
+	CoverImage            AnilistImage          `json:"coverImage" gorm:"embedded;prefix:cover_"`
+	BannerImage           string                `json:"bannerImage"`
+	Color                 string                `json:"color"`
+	Synonyms              pq.StringArray        `json:"synonyms" gorm:"type:text[]"`
+	Scores                AnimeScores           `json:"scores" gorm:"embedded;prefix:score_"`
+	Characters            []AnimeCharacter      `json:"characters" gorm:"many2many:anime_to_characters;joinForeignKey:anime_id;joinReferences:anime_character_id"`
+	Staff                 []AnimeStaff          `json:"staff" gorm:"many2many:anime_to_staff;joinForeignKey:anime_id;joinReferences:anime_staff_id"`
+	Genres                []AnimeGenre          `json:"genres" gorm:"many2many:anime_to_genres;joinForeignKey:anime_id;joinReferences:anime_genre_id"`
+	Studios               []AnimeStudio         `json:"studios" gorm:"many2many:anime_to_studios;joinForeignKey:anime_id;joinReferences:anime_studio_id"`
+	Tags                  []AnimeTag            `json:"tags" gorm:"many2many:anime_to_tags;joinForeignKey:anime_id;joinReferences:anime_tag_id"`
+	ExternalLinks         []AnimeExternalLink   `json:"externalLinks" gorm:"foreignKey:AnimeID"`
+	Relations             []Anime               `json:"relations" gorm:"-"`
+	Recommendations       []Anime               `json:"recommendations" gorm:"-"`
+	DirectRelations       []AnimeRelation       `json:"-" gorm:"foreignKey:SourceAnimeID"`
+	DirectRecommendations []AnimeRecommendation `json:"-" gorm:"foreignKey:SourceAnimeID;joinForeignKey:source_anime_id;joinReferences:target_anime_id"`
+	IsAdult               bool                  `json:"isAdult"`
 }
 
 type AnimeStudio struct {
@@ -230,4 +234,30 @@ type AnimeVoiceActor struct {
 type AnimeGenre struct {
 	BaseModel
 	Name string `json:"name" gorm:"type:varchar(100);uniqueIndex"`
+}
+
+type AnimeRelation struct {
+	BaseModel
+	SourceAnime   Anime  `gorm:"foreignkey:SourceAnimeID"`
+	SourceAnimeID uint   `gorm:"primaryKey"`
+	TargetAnime   Anime  `gorm:"foreignkey:TargetAnimeID"`
+	TargetAnimeID uint   `gorm:"primaryKey"`
+	RelationType  string `gorm:"type:varchar(50)"`
+}
+
+func (AnimeRelation) TableName() string {
+	return "anime_to_relations"
+}
+
+type AnimeRecommendation struct {
+	BaseModel
+	SourceAnime   Anime `gorm:"foreignkey:SourceAnimeID"`
+	SourceAnimeID uint  `gorm:"primaryKey"`
+	TargetAnime   Anime `gorm:"foreignkey:TargetAnimeID"`
+	TargetAnimeID uint  `gorm:"primaryKey"`
+	Rating        int   `gorm:"type:int"`
+}
+
+func (AnimeRecommendation) TableName() string {
+	return "anime_to_recommendations"
 }

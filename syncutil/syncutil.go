@@ -19,6 +19,7 @@ import (
 
 	"github.com/lib/pq"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 //go:embed queries/anilist.graphql
@@ -155,7 +156,7 @@ func processMappings(mappings []*fribbMapping, client *http.Client, limiter *adv
 			limiter.wait()
 
 			// Process the mapping
-			if err := processMapping(mapping, client); err != nil {
+			if err := processMapping(mapping, client, limiter); err != nil {
 				logger.Errorf("Failed to process mapping %d: %v", mapping.Anilist, err)
 				statsMutex.Lock()
 				stats.errors++
@@ -201,10 +202,24 @@ func filterValidMappings(mappings []*fribbMapping) []*fribbMapping {
 func pad(toPad interface{}, length int) string {
 	return fmt.Sprintf("%-*v", length, toPad)
 }
-func processMapping(mapping *fribbMapping, client *http.Client) error {
-	// First check if anime exists and its status
+
+func processMapping(mapping *fribbMapping, client *http.Client, limiter *advancedRateLimiter) error {
+	// First transaction for main anime and immediate relationships
+	tx := database.DB.Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("begin transaction failed: %w", tx.Error)
+	}
+
+	// Ensure transaction is handled properly
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Check if anime exists and its status
 	var existingAnime database.Anime
-	err := database.DB.Where("anilist = ?", mapping.Anilist).First(&existingAnime).Error
+	err := tx.Where("anilist = ?", mapping.Anilist).First(&existingAnime).Error
 	exists := !errors.Is(err, gorm.ErrRecordNotFound)
 
 	// If anime exists and is finished/completed, skip processing
@@ -216,6 +231,7 @@ func processMapping(mapping *fribbMapping, client *http.Client) error {
 				pad(mapping.Anilist, 6),
 				existingAnime.Titles.UserPreferred,
 				existingAnime.Status)
+			tx.Rollback()
 			return nil
 		}
 	}
@@ -223,6 +239,7 @@ func processMapping(mapping *fribbMapping, client *http.Client) error {
 	// Fetch anime data from Anilist
 	media, err := fetchAnimeData(client, mapping.Anilist)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("fetch failed: %w", err)
 	}
 
@@ -247,64 +264,113 @@ func processMapping(mapping *fribbMapping, client *http.Client) error {
 	// Build the anime model
 	anime := buildAnimeModel(media, mapping)
 
-	return database.DB.Transaction(func(tx *gorm.DB) error {
-		if exists {
-			// Update existing anime
-			anime.ID = existingAnime.ID
-			logger.Debugf("Updating existing anime with ID: %d", anime.ID)
+	// Create or update basic anime data first
+	if exists {
+		// Update existing anime
+		anime.ID = existingAnime.ID
+		logger.Debugf("Updating existing anime with ID: %d", anime.ID)
 
-			if err := tx.Model(&existingAnime).Updates(anime).Error; err != nil {
-				return fmt.Errorf("update anime failed: %w", err)
-			}
-
-			// Clear existing relationships
-			if err := tx.Where("anime_id = ?", anime.ID).Delete(&database.AnimeExternalLink{}).Error; err != nil {
-				return fmt.Errorf("clear external links failed: %w", err)
-			}
-			if err := tx.Exec("DELETE FROM anime_to_characters WHERE anime_id = ?", anime.ID).Error; err != nil {
-				return fmt.Errorf("clear characters failed: %w", err)
-			}
-			if err := tx.Exec("DELETE FROM anime_to_staff WHERE anime_id = ?", anime.ID).Error; err != nil {
-				return fmt.Errorf("clear staff failed: %w", err)
-			}
-			if err := tx.Exec("DELETE FROM anime_to_genres WHERE anime_id = ?", anime.ID).Error; err != nil {
-				return fmt.Errorf("clear genres failed: %w", err)
-			}
-			if err := tx.Exec("DELETE FROM anime_to_studios WHERE anime_id = ?", anime.ID).Error; err != nil {
-				return fmt.Errorf("clear studios failed: %w", err)
-			}
-			if err := tx.Exec("DELETE FROM anime_to_tags WHERE anime_id = ?", anime.ID).Error; err != nil {
-				return fmt.Errorf("clear tags failed: %w", err)
-			}
-		} else {
-			// Create new anime
-			logger.Debugf("Creating new anime")
-			result := tx.Create(&anime)
-			if result.Error != nil {
-				return fmt.Errorf("create anime failed: %w", result.Error)
-			}
-			logger.Debugf("Created new anime with ID: %d", anime.ID)
+		if err := tx.Model(&existingAnime).Updates(anime).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("update anime failed: %w", err)
 		}
 
-		// Process relationships
-		if err := processCharacters(tx, media.Characters, anime.ID); err != nil {
-			return fmt.Errorf("process characters failed: %w", err)
+		// Clear existing relationships
+		if err := tx.Where("anime_id = ?", anime.ID).Delete(&database.AnimeExternalLink{}).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("clear external links failed: %w", err)
 		}
-		if err := processStaff(tx, media.Staff, anime.ID); err != nil {
-			return fmt.Errorf("process staff failed: %w", err)
+		// Clear many-to-many relationships
+		tables := []string{
+			"anime_to_characters",
+			"anime_to_staff",
+			"anime_to_genres",
+			"anime_to_studios",
+			"anime_to_tags",
 		}
-		if err := processGenres(tx, media.Genres, anime.ID); err != nil {
-			return fmt.Errorf("process genres failed: %w", err)
+		for _, table := range tables {
+			if err := tx.Exec("DELETE FROM "+table+" WHERE anime_id = ?", anime.ID).Error; err != nil {
+				tx.Rollback()
+				return fmt.Errorf("clear %s failed: %w", table, err)
+			}
 		}
-		if err := processStudios(tx, media.Studios.Edges, anime.ID); err != nil {
-			return fmt.Errorf("process studios failed: %w", err)
+		// Clear relation tables separately as they have different column names
+		if err := tx.Where("source_anime_id = ?", anime.ID).Delete(&database.AnimeRelation{}).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("clear relations failed: %w", err)
 		}
-		if err := processTags(tx, media.Tags, anime.ID); err != nil {
-			return fmt.Errorf("process tags failed: %w", err)
+		if err := tx.Where("source_anime_id = ?", anime.ID).Delete(&database.AnimeRecommendation{}).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("clear recommendations failed: %w", err)
 		}
+	} else {
+		// Create new anime
+		logger.Debugf("Creating new anime")
+		if err := tx.Create(&anime).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("create anime failed: %w", err)
+		}
+		logger.Debugf("Created new anime with ID: %d", anime.ID)
+	}
 
-		return nil
-	})
+	// Process immediate relationships
+	if err := processCharacters(tx, media.Characters, anime.ID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("process characters failed: %w", err)
+	}
+	if err := processStaff(tx, media.Staff, anime.ID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("process staff failed: %w", err)
+	}
+	if err := processGenres(tx, media.Genres, anime.ID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("process genres failed: %w", err)
+	}
+	if err := processStudios(tx, media.Studios.Edges, anime.ID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("process studios failed: %w", err)
+	}
+	if err := processTags(tx, media.Tags, anime.ID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("process tags failed: %w", err)
+	}
+	if err := processExternalLinks(tx, media.ExternalLinks, anime.ID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("process external links failed: %w", err)
+	}
+
+	// Commit the first transaction with the main anime and immediate relationships
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("commit main transaction failed: %w", err)
+	}
+
+	// Start a new transaction for recursive relationships
+	tx = database.DB.Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("begin relations transaction failed: %w", tx.Error)
+	}
+
+	// Process recursive relationships
+	if err := processRelations(tx, media.Relations, anime.ID, client, limiter); err != nil {
+		tx.Rollback()
+		logger.Warnf("Failed to process relations for anime %d: %v", anime.ID, err)
+		return nil // Don't fail the whole process if relations fail
+	}
+	if err := processRecommendations(tx, media.Recommendations, anime.ID, client, limiter); err != nil {
+		tx.Rollback()
+		logger.Warnf("Failed to process recommendations for anime %d: %v", anime.ID, err)
+		return nil // Don't fail the whole process if recommendations fail
+	}
+
+	// Commit the relations transaction
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		logger.Warnf("Failed to commit relations transaction for anime %d: %v", anime.ID, err)
+		return nil // Don't fail the whole process if relations commit fails
+	}
+
+	return nil
 }
 
 func fetchAnimeData(client *http.Client, id int) (*anilistMedia, error) {
@@ -779,5 +845,129 @@ func processTags(tx *gorm.DB, tags []anilistTag, animeID uint) error {
 		}
 	}
 
+	return nil
+}
+
+func processRelations(tx *gorm.DB, relations anilistRelationConnection, animeID uint, client *http.Client, limiter *advancedRateLimiter) error {
+	processedMap := make(map[int]bool)
+	logger.Debugf("Processing relations for anime %d", animeID)
+	// First pass: process all related anime to ensure they exist
+	for _, edge := range relations.Edges {
+		// Skip if not ANIME type or already processed
+		if edge.Node.Type != "ANIME" || processedMap[edge.Node.ID] {
+			continue
+		}
+		processedMap[edge.Node.ID] = true
+
+		// Process related anime first to ensure it exists
+		logger.Debugf("Processing relation %d: %s", edge.Node.ID, edge.RelationType)
+		limiter.wait()
+		if err := processMapping(&fribbMapping{Anilist: edge.Node.ID}, client, limiter); err != nil {
+			logger.Warnf("Failed to process related anime %d: %v", edge.Node.ID, err)
+			// Skip this relation if we couldn't process the related anime
+			continue
+		}
+	}
+
+	// Second pass: now that all related anime exist, create the relations
+	for _, edge := range relations.Edges {
+		if edge.Node.Type != "ANIME" {
+			continue
+		}
+
+		// Verify the related anime exists in the database
+		var relatedAnime database.Anime
+		if err := tx.Where("anilist = ?", edge.Node.ID).First(&relatedAnime).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.Warnf("Related anime %d not found in database, skipping relation", edge.Node.ID)
+				continue
+			}
+			return fmt.Errorf("find related anime failed: %w", err)
+		}
+
+		// Create the relation record using the actual database IDs
+		relation := database.AnimeRelation{
+			SourceAnimeID: animeID,
+			TargetAnimeID: relatedAnime.ID,
+			RelationType:  edge.RelationType,
+		}
+
+		// Create relation using clause to handle duplicates gracefully
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&relation).Error; err != nil {
+			return fmt.Errorf("create relation failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func processRecommendations(tx *gorm.DB, recommendations anilistRecommendationConnection, animeID uint, client *http.Client, limiter *advancedRateLimiter) error {
+	processedMap := make(map[int]bool)
+	logger.Debugf("Processing recommendations for anime %d", animeID)
+	// First pass: process all recommended anime
+	for _, edge := range recommendations.Edges {
+		rec := edge.Node
+		if rec.MediaRecommendation == nil || processedMap[rec.MediaRecommendation.ID] {
+			continue
+		}
+		processedMap[rec.MediaRecommendation.ID] = true
+
+		// Process recommended anime first to ensure it exists
+		logger.Debugf("Processing recommendation %d: %d", rec.MediaRecommendation.ID, rec.Rating)
+		limiter.wait()
+		if err := processMapping(&fribbMapping{Anilist: rec.MediaRecommendation.ID}, client, limiter); err != nil {
+			logger.Warnf("Failed to process recommended anime %d: %v", rec.MediaRecommendation.ID, err)
+			// Skip this recommendation if we couldn't process the recommended anime
+			continue
+		}
+	}
+
+	// Second pass: create recommendations
+	for _, edge := range recommendations.Edges {
+		rec := edge.Node
+		if rec.MediaRecommendation == nil {
+			continue
+		}
+
+		// Verify the recommended anime exists in the database
+		var recAnime database.Anime
+		if err := tx.Where("anilist = ?", rec.MediaRecommendation.ID).First(&recAnime).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.Warnf("Recommended anime %d not found in database, skipping recommendation", rec.MediaRecommendation.ID)
+				continue
+			}
+			return fmt.Errorf("find recommended anime failed: %w", err)
+		}
+
+		// Create the recommendation record using the actual database IDs
+		recommendation := database.AnimeRecommendation{
+			SourceAnimeID: animeID,
+			TargetAnimeID: recAnime.ID,
+			Rating:        rec.Rating,
+		}
+
+		// Create recommendation using clause to handle duplicates gracefully
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&recommendation).Error; err != nil {
+			return fmt.Errorf("create recommendation failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func processExternalLinks(tx *gorm.DB, links []anilistExternalLink, animeID uint) error {
+	for _, link := range links {
+		externalLink := database.AnimeExternalLink{
+			AnimeID:  animeID,
+			URL:      link.URL,
+			Site:     link.Site,
+			Type:     link.Type,
+			Language: link.Language,
+			Color:    link.Color,
+			Icon:     link.Icon,
+		}
+
+		if err := tx.Create(&externalLink).Error; err != nil {
+			return fmt.Errorf("create external link failed: %w", err)
+		}
+	}
 	return nil
 }

@@ -53,7 +53,7 @@ func cleanDatabaseIfDebug(db *gorm.DB) {
 
 func migrateSchema(db *gorm.DB) {
 	logger.Debugf("AutoMigrating Database ...")
-	baseModels := []interface{}{&Anime{}, &AnimeCharacter{}, &AnimeStaff{}, &AnimeVoiceActor{}, &AnimeStudio{}, &AnimeTag{}, &AnimeGenre{}, &AnimeExternalLink{}}
+	baseModels := []interface{}{&Anime{}, &AnimeCharacter{}, &AnimeStaff{}, &AnimeVoiceActor{}, &AnimeStudio{}, &AnimeTag{}, &AnimeGenre{}, &AnimeExternalLink{}, &AnimeRelation{}, &AnimeRecommendation{}}
 	if err := db.AutoMigrate(baseModels...); err != nil {
 		logger.Fatalf("Base tables migration failed: %v", err)
 	}
