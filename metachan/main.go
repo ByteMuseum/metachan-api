@@ -30,14 +30,12 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	// Start sync in background
-	if config.Config.DebugMode.Enabled {
-		go func() {
-			for {
-				syncutil.Sync()
-				time.Sleep(24 * time.Hour) // Sync daily
-			}
-		}()
-	}
+	go func() {
+		for {
+			syncutil.Sync()
+			time.Sleep(24 * time.Hour) // Sync daily
+		}
+	}()
 
 	// Start server in goroutine
 	go func() {

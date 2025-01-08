@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -200,13 +201,32 @@ func filterValidMappings(mappings []*fribbMapping) []*fribbMapping {
 func pad(toPad interface{}, length int) string {
 	return fmt.Sprintf("%-*v", length, toPad)
 }
-
 func processMapping(mapping *fribbMapping, client *http.Client) error {
+	// First check if anime exists and its status
+	var existingAnime database.Anime
+	err := database.DB.Where("anilist = ?", mapping.Anilist).First(&existingAnime).Error
+	exists := !errors.Is(err, gorm.ErrRecordNotFound)
+
+	// If anime exists and is finished/completed, skip processing
+	if exists {
+		if existingAnime.Status == database.Finished ||
+			existingAnime.Status == database.Cancelled ||
+			existingAnime.Status == database.Hiatus {
+			logger.Debugf("Skipping mapping %s | Title: %s (Status: %s)",
+				pad(mapping.Anilist, 6),
+				existingAnime.Titles.UserPreferred,
+				existingAnime.Status)
+			return nil
+		}
+	}
+
+	// Fetch anime data from Anilist
 	media, err := fetchAnimeData(client, mapping.Anilist)
 	if err != nil {
 		return fmt.Errorf("fetch failed: %w", err)
 	}
 
+	// Get preferred title for logging
 	title := media.Title.UserPreferred
 	if title == "" {
 		title = media.Title.Romaji
@@ -217,31 +237,68 @@ func processMapping(mapping *fribbMapping, client *http.Client) error {
 	if title == "" {
 		title = media.Title.Native
 	}
-	logger.Debugf("Processing mapping %s | Title: %s", pad(mapping.Anilist, 6), title)
+
+	status := convertStatus(media.Status)
+	logger.Debugf("Processing mapping %s | Title: %s (Status: %s)",
+		pad(mapping.Anilist, 6),
+		title,
+		status)
+
+	// Build the anime model
+	anime := buildAnimeModel(media, mapping)
 
 	return database.DB.Transaction(func(tx *gorm.DB) error {
-		anime := buildAnimeModel(media, mapping)
+		if exists {
+			// Update existing anime
+			anime.ID = existingAnime.ID
+			logger.Debugf("Updating existing anime with ID: %d", anime.ID)
 
-		if err := tx.Create(&anime).Error; err != nil {
-			return fmt.Errorf("create anime failed: %w", err)
+			if err := tx.Model(&existingAnime).Updates(anime).Error; err != nil {
+				return fmt.Errorf("update anime failed: %w", err)
+			}
+
+			// Clear existing relationships
+			if err := tx.Where("anime_id = ?", anime.ID).Delete(&database.AnimeExternalLink{}).Error; err != nil {
+				return fmt.Errorf("clear external links failed: %w", err)
+			}
+			if err := tx.Exec("DELETE FROM anime_to_characters WHERE anime_id = ?", anime.ID).Error; err != nil {
+				return fmt.Errorf("clear characters failed: %w", err)
+			}
+			if err := tx.Exec("DELETE FROM anime_to_staff WHERE anime_id = ?", anime.ID).Error; err != nil {
+				return fmt.Errorf("clear staff failed: %w", err)
+			}
+			if err := tx.Exec("DELETE FROM anime_to_genres WHERE anime_id = ?", anime.ID).Error; err != nil {
+				return fmt.Errorf("clear genres failed: %w", err)
+			}
+			if err := tx.Exec("DELETE FROM anime_to_studios WHERE anime_id = ?", anime.ID).Error; err != nil {
+				return fmt.Errorf("clear studios failed: %w", err)
+			}
+			if err := tx.Exec("DELETE FROM anime_to_tags WHERE anime_id = ?", anime.ID).Error; err != nil {
+				return fmt.Errorf("clear tags failed: %w", err)
+			}
+		} else {
+			// Create new anime
+			logger.Debugf("Creating new anime")
+			result := tx.Create(&anime)
+			if result.Error != nil {
+				return fmt.Errorf("create anime failed: %w", result.Error)
+			}
+			logger.Debugf("Created new anime with ID: %d", anime.ID)
 		}
 
+		// Process relationships
 		if err := processCharacters(tx, media.Characters, anime.ID); err != nil {
 			return fmt.Errorf("process characters failed: %w", err)
 		}
-
 		if err := processStaff(tx, media.Staff, anime.ID); err != nil {
 			return fmt.Errorf("process staff failed: %w", err)
 		}
-
 		if err := processGenres(tx, media.Genres, anime.ID); err != nil {
 			return fmt.Errorf("process genres failed: %w", err)
 		}
-
 		if err := processStudios(tx, media.Studios.Edges, anime.ID); err != nil {
 			return fmt.Errorf("process studios failed: %w", err)
 		}
-
 		if err := processTags(tx, media.Tags, anime.ID); err != nil {
 			return fmt.Errorf("process tags failed: %w", err)
 		}

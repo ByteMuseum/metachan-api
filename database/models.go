@@ -112,16 +112,16 @@ type AnimeScores struct {
 }
 
 type AnimeMapping struct {
-	AniDB       int    `json:"anidb,omitempty"`
-	Anilist     int    `json:"anilist,omitempty"`
-	AnimePlanet string `json:"animePlanet,omitempty"`
-	AniSearch   int    `json:"aniSearch,omitempty"`
-	Kitsu       int    `json:"kitsu,omitempty"`
-	LiveChart   int    `json:"liveChart,omitempty"`
-	MyAnimeList int    `json:"myAnimeList,omitempty"`
-	NotifyMoe   string `json:"notifyMoe,omitempty"`
-	TheMovieDB  int    `json:"theMovieDB,omitempty"`
-	TheTVDB     int    `json:"theTVDB,omitempty"`
+	AniDB       int    `json:"anidb,omitempty" gorm:"column:anidb"`
+	Anilist     int    `json:"anilist,omitempty" gorm:"column:anilist"`
+	AnimePlanet string `json:"animePlanet,omitempty" gorm:"column:anime_planet"`
+	AniSearch   int    `json:"aniSearch,omitempty" gorm:"column:anisearch"`
+	Kitsu       int    `json:"kitsu,omitempty" gorm:"column:kitsu"`
+	LiveChart   int    `json:"liveChart,omitempty" gorm:"column:livechart"`
+	MyAnimeList int    `json:"myAnimeList,omitempty" gorm:"column:myanimelist"`
+	NotifyMoe   string `json:"notifyMoe,omitempty" gorm:"column:notify_moe"`
+	TheMovieDB  int    `json:"theMovieDB,omitempty" gorm:"column:themoviedb"`
+	TheTVDB     int    `json:"theTVDB,omitempty" gorm:"column:thetvdb"`
 }
 
 type Anime struct {
