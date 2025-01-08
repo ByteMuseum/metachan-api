@@ -1,62 +1,144 @@
 package database
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/lib/pq"
 )
+
+type BaseModel struct {
+	ID        uint       `json:"id"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	DeletedAt *time.Time `json:"deletedAt,omitempty" gorm:"index"`
+}
 
 type AnilistAnimeFormat string
-
-const (
-	TV      AnilistAnimeFormat = "TV"
-	TVShort AnilistAnimeFormat = "TV_SHORT"
-	Movie   AnilistAnimeFormat = "MOVIE"
-	Special AnilistAnimeFormat = "SPECIAL"
-	OVA     AnilistAnimeFormat = "OVA"
-	ONA     AnilistAnimeFormat = "ONA"
-	Music   AnilistAnimeFormat = "MUSIC"
-	Manga   AnilistAnimeFormat = "MANGA"
-	Novel   AnilistAnimeFormat = "NOVEL"
-	OneShot AnilistAnimeFormat = "ONE_SHOT"
-)
-
+type AnilistAnimeSource string
+type AnimeSeason string
 type AnimeSource string
-
-const (
-	AniDB       AnimeSource = "anidb"
-	Anilist     AnimeSource = "anilist"
-	AnimePlanet AnimeSource = "animeplanet"
-	AniSearch   AnimeSource = "anisearch"
-	Kitsu       AnimeSource = "kitsu"
-	LiveSearch  AnimeSource = "livesearch"
-	MyAnimeList AnimeSource = "myanimelist"
-	NotifyMoe   AnimeSource = "notifymoe"
-	TheMovieDB  AnimeSource = "tmdb"
-	TheTVDB     AnimeSource = "tvdb"
-)
-
+type AnimeStatus string
 type TitleType string
 
 const (
+	FormatTV      AnilistAnimeFormat = "TV"
+	FormatTVShort AnilistAnimeFormat = "TV_SHORT"
+	FormatMovie   AnilistAnimeFormat = "MOVIE"
+	FormatSpecial AnilistAnimeFormat = "SPECIAL"
+	FormatOVA     AnilistAnimeFormat = "OVA"
+	FormatONA     AnilistAnimeFormat = "ONA"
+	FormatMusic   AnilistAnimeFormat = "MUSIC"
+	FormatManga   AnilistAnimeFormat = "MANGA"
+	FormatNovel   AnilistAnimeFormat = "NOVEL"
+	FormatOneShot AnilistAnimeFormat = "ONE_SHOT"
+
+	AnilistSourceOriginal          AnilistAnimeSource = "ORIGINAL"
+	AnilistSourceManga             AnilistAnimeSource = "MANGA"
+	AnilistSourceLightNovel        AnilistAnimeSource = "LIGHT_NOVEL"
+	AnilistSourceVisualNovel       AnilistAnimeSource = "VISUAL_NOVEL"
+	AnilistSourceVideoGame         AnilistAnimeSource = "VIDEO_GAME"
+	AnilistSourceOther             AnilistAnimeSource = "OTHER"
+	AnilistSourceDoujinshi         AnilistAnimeSource = "DOUJINSHI"
+	AnilistSourceAnime             AnilistAnimeSource = "ANIME"
+	AnilistSourceWebNovel          AnilistAnimeSource = "WEB_NOVEL"
+	AnilistSourceLiveAction        AnilistAnimeSource = "LIVE_ACTION"
+	AnilistSourceGame              AnilistAnimeSource = "GAME"
+	AnilistSourceComic             AnilistAnimeSource = "COMIC"
+	AnilistSourceMultimediaProject AnilistAnimeSource = "MULTIMEDIA_PROJECT"
+	AnilistSourcePictureBook       AnilistAnimeSource = "PICTURE_BOOK"
+
+	Winter AnimeSeason = "WINTER"
+	Spring AnimeSeason = "SPRING"
+	Summer AnimeSeason = "SUMMER"
+	Fall   AnimeSeason = "FALL"
+
+	MappingAniDB       AnimeSource = "anidb"
+	MappingAnilist     AnimeSource = "anilist"
+	MappingAnimePlanet AnimeSource = "animeplanet"
+	MappingAniSearch   AnimeSource = "anisearch"
+	MappingKitsu       AnimeSource = "kitsu"
+	MappingLiveSearch  AnimeSource = "livesearch"
+	MappingMyAnimeList AnimeSource = "myanimelist"
+	MappingNotifyMoe   AnimeSource = "notifymoe"
+	MappingTheMovieDB  AnimeSource = "tmdb"
+	MappingTheTVDB     AnimeSource = "tvdb"
+
+	Releasing      AnimeStatus = "RELEASING"
+	Finished       AnimeStatus = "FINISHED"
+	NotYetReleased AnimeStatus = "NOT_YET_RELEASED"
+	Cancelled      AnimeStatus = "CANCELLED"
+	Hiatus         AnimeStatus = "HIATUS"
+
 	Primary     TitleType = "primary"
 	English     TitleType = "english"
 	Native      TitleType = "native"
 	Alternative TitleType = "alternative"
 )
 
-type Anime struct {
-	ID        uint           `gorm:"primarykey" json:"-"`
-	CreatedAt time.Time      `json:"-"`
-	UpdatedAt time.Time      `json:"-"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+type Date struct {
+	Year  int `json:"year"`
+	Month int `json:"month"`
+	Day   int `json:"day"`
+}
 
-	Titles   []AnimeTitle   `json:"titles"`
-	Mappings []AnimeMapping `json:"mappings"`
-	Formats  AnimeFormats   `json:"formats" gorm:"embedded"`
+type AnilistName struct {
+	Romaji        string `json:"romaji" gorm:"column:romaji"`
+	English       string `json:"english" gorm:"column:english"`
+	Native        string `json:"native" gorm:"column:native"`
+	UserPreferred string `json:"userPreferred" gorm:"column:user_preferred"`
+}
 
-	StartDate Date `json:"startDate" gorm:"embedded;embeddedPrefix:start_"`
-	EndDate   Date `json:"endDate" gorm:"embedded;embeddedPrefix:end_"`
+func (n AnilistName) Value() (driver.Value, error) {
+	return json.Marshal(n)
+}
+
+func (n *AnilistName) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("unsupported type for AnilistName: %T", value)
+	}
+
+	return json.Unmarshal(bytes, n)
+}
+
+type AnilistImage struct {
+	ExtraLarge string `json:"extraLarge" gorm:"column:extra_large"`
+	Large      string `json:"large" gorm:"column:large"`
+	Medium     string `json:"medium" gorm:"column:medium"`
+}
+
+func (i AnilistImage) Value() (driver.Value, error) {
+	return json.Marshal(i)
+}
+
+func (i *AnilistImage) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("unsupported type for AnilistImage: %T", value)
+	}
+
+	return json.Unmarshal(bytes, i)
 }
 
 type AnimeFormats struct {
@@ -64,8 +146,143 @@ type AnimeFormats struct {
 	Fribb   string             `json:"fribb"`
 }
 
+type AnilistAnimeScores struct {
+	Average    int `json:"average"`
+	Mean       int `json:"mean"`
+	Popularity int `json:"popularity"`
+	Trending   int `json:"trending"`
+	Favourites int `json:"favourites"`
+}
+
+type AnimeScores struct {
+	AnilistScores AnilistAnimeScores `json:"anilist" gorm:"embedded;prefix:anilist_"`
+}
+
+type Anime struct {
+	BaseModel
+	Titles          []AnimeTitle         `json:"titles" gorm:"foreignKey:AnimeID"`
+	Mappings        []AnimeMapping       `json:"mappings" gorm:"foreignKey:AnimeID"`
+	Formats         AnimeFormats         `json:"formats" gorm:"embedded"`
+	StartDate       Date                 `json:"startDate" gorm:"embedded;prefix:start_"`
+	EndDate         Date                 `json:"endDate" gorm:"embedded;prefix:end_"`
+	Status          AnimeStatus          `json:"status"`
+	Description     string               `json:"description" gorm:"type:text"`
+	Season          AnimeSeason          `json:"season"`
+	SeasonYear      int                  `json:"seasonYear"`
+	Duration        int                  `json:"duration"`
+	CountryOfOrigin string               `json:"countryOfOrigin"`
+	Source          AnilistAnimeSource   `json:"source"`
+	Hashtag         string               `json:"hashtag"`
+	CoverImage      AnilistImage         `json:"coverImage" gorm:"type:jsonb"`
+	BannerImage     string               `json:"bannerImage"`
+	Color           string               `json:"color"`
+	Synonyms        pq.StringArray       `json:"synonyms" gorm:"type:text[]"`
+	Scores          AnimeScores          `json:"scores" gorm:"embedded"`
+	Characters      []AnimeCharacterJoin `json:"-" gorm:"foreignKey:AnimeID"`
+	Staff           []AnimeStaffJoin     `json:"-" gorm:"foreignKey:AnimeID"`
+	Genres          []AnimeGenreJoin     `json:"-" gorm:"foreignKey:AnimeID"`
+	Studios         []AnimeStudioJoin    `json:"-" gorm:"foreignKey:AnimeID"`
+	Tags            []AnimeTagJoin       `json:"-" gorm:"foreignKey:AnimeID"`
+	ExternalLinks   []AnimeExternalLink  `json:"externalLinks" gorm:"foreignKey:AnimeID"`
+	IsAdult         bool                 `json:"isAdult"`
+}
+
+type AnimeStudio struct {
+	BaseModel
+	Name              string            `json:"name"`
+	IsAnimationStudio bool              `json:"isAnimationStudio"`
+	SiteURL           string            `json:"siteURL"`
+	AnilistFavourites int               `json:"anilistFavourites"`
+	Animes            []AnimeStudioJoin `json:"-" gorm:"foreignKey:AnimeStudioID"`
+}
+
+type AnimeStudioJoin struct {
+	AnimeID       uint `gorm:"primaryKey"`
+	AnimeStudioID uint `gorm:"primaryKey"`
+}
+
+type AnimeExternalLink struct {
+	BaseModel
+	AnimeID  uint   `json:"-"`
+	URL      string `json:"url"`
+	Site     string `json:"site"`
+	Type     string `json:"type"`
+	Language string `json:"language"`
+	Color    string `json:"color"`
+	Icon     string `json:"icon"`
+}
+
+type AnimeTag struct {
+	BaseModel
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Category    string         `json:"category"`
+	Rank        int            `json:"rank"`
+	IsAdult     bool           `json:"isAdult"`
+	Animes      []AnimeTagJoin `json:"-" gorm:"foreignKey:AnimeTagID"`
+}
+
+type AnimeTagJoin struct {
+	AnimeID    uint `gorm:"primaryKey"`
+	AnimeTagID uint `gorm:"primaryKey"`
+}
+
+type AnimeCharacter struct {
+	BaseModel
+	Name        AnilistName          `json:"name" gorm:"type:jsonb"`
+	Image       AnilistImage         `json:"image" gorm:"type:jsonb"`
+	Description string               `json:"description" gorm:"type:text"`
+	Gender      string               `json:"gender"`
+	DateOfBirth Date                 `json:"dateOfBirth" gorm:"embedded;prefix:birth_"`
+	Age         int                  `json:"age"`
+	BloodType   string               `json:"bloodType"`
+	VoiceActors []AnimeStaff         `json:"voiceActors" gorm:"many2many:character_voice_actors;foreignKey:ID;references:ID"`
+	Animes      []AnimeCharacterJoin `json:"-" gorm:"foreignKey:AnimeCharacterID"`
+}
+
+type AnimeStaff struct {
+	BaseModel
+	Name               AnilistName      `json:"name" gorm:"type:jsonb"`
+	Language           string           `json:"language"`
+	Image              AnilistImage     `json:"image" gorm:"type:jsonb"`
+	Description        string           `json:"description" gorm:"type:text"`
+	PrimaryOccupations pq.StringArray   `json:"primaryOccupations" gorm:"type:text[]"`
+	DateOfBirth        Date             `json:"dateOfBirth" gorm:"embedded;prefix:birth_"`
+	DateOfDeath        Date             `json:"dateOfDeath" gorm:"embedded;prefix:death_"`
+	Age                int              `json:"age"`
+	YearsActive        pq.Int64Array    `json:"yearsActive" gorm:"type:integer[]"`
+	HomeTown           string           `json:"homeTown"`
+	BloodType          string           `json:"bloodType"`
+	AnilistFavourites  int              `json:"anilistFavourites"`
+	VoicedCharacters   []AnimeCharacter `json:"voicedCharacters" gorm:"many2many:character_voice_actors;foreignKey:ID;references:ID"`
+	Animes             []AnimeStaffJoin `json:"-" gorm:"foreignKey:AnimeStaffID"`
+}
+
+type AnimeCharacterJoin struct {
+	AnimeID          uint `gorm:"primaryKey"`
+	AnimeCharacterID uint `gorm:"primaryKey"`
+	Role             string
+}
+
+type AnimeStaffJoin struct {
+	AnimeID      uint `gorm:"primaryKey"`
+	AnimeStaffID uint `gorm:"primaryKey"`
+	Role         string
+}
+
+type AnimeGenre struct {
+	BaseModel
+	Name   string           `json:"name" gorm:"type:varchar(100);uniqueIndex"`
+	Animes []AnimeGenreJoin `json:"-" gorm:"foreignKey:AnimeGenreID"`
+}
+
+type AnimeGenreJoin struct {
+	AnimeID      uint `gorm:"primaryKey"`
+	AnimeGenreID uint `gorm:"primaryKey"`
+}
+
 type AnimeMapping struct {
-	ID          uint   `gorm:"primarykey" json:"-"`
+	BaseModel
 	AnimeID     uint   `json:"-"`
 	AniDB       int    `json:"anidb,omitempty"`
 	Anilist     int    `json:"anilist,omitempty"`
@@ -80,14 +297,18 @@ type AnimeMapping struct {
 }
 
 type AnimeTitle struct {
-	ID      uint      `gorm:"primarykey" json:"-"`
+	BaseModel
 	AnimeID uint      `json:"-"`
 	Type    TitleType `json:"type"`
 	Title   string    `json:"title"`
 }
 
-type Date struct {
-	Year  int `json:"year" gorm:"column:year"`
-	Month int `json:"month" gorm:"column:month"`
-	Day   int `json:"day" gorm:"column:day"`
+type CharacterVoiceActor struct {
+	CharacterID  uint `gorm:"primaryKey"`
+	VoiceActorID uint `gorm:"primaryKey"`
+	Language     string
+}
+
+func (CharacterVoiceActor) TableName() string {
+	return "character_voice_actors"
 }

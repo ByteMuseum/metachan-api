@@ -14,58 +14,72 @@ var (
 )
 
 func init() {
-	connectDB()
-	handleDatabaseCleanup()
-	migrateSchema()
+	setupDatabase()
 }
 
-func connectDB() {
-	logger.Infof("Connecting to Database ...")
-	logger.Debugf("DSN: %s", config.Config.DSN)
+func setupDatabase() {
+	db := connectDatabase()
+	cleanDatabaseIfDebug(db)
+	migrateSchema(db)
+	DB = db
+}
 
+func connectDatabase() *gorm.DB {
+	logger.Infof("Connecting to Database ...")
 	db, err := gorm.Open(postgres.Open(config.Config.DSN), &gorm.Config{})
 	if err != nil {
-		logger.Fatalf("Failed to connect to database: %v", err)
+		logger.Fatalf("Database connection failed: %v", err)
 	}
-
-	DB = db
 	logger.Infof("Connected to Database")
+	return db
 }
 
-func handleDatabaseCleanup() {
-	if !config.Config.DebugMode.Enabled {
-		if config.Config.DebugMode.CleanDatabaseOnStart {
-			logger.Warnf("Database cleanup ignored: DebugMode disabled")
-		}
+func cleanDatabaseIfDebug(db *gorm.DB) {
+	if !config.Config.DebugMode.Enabled || !config.Config.DebugMode.CleanDatabaseOnStart {
 		return
 	}
-
-	if !config.Config.DebugMode.CleanDatabaseOnStart {
-		return
-	}
-
 	logger.Debugf("Cleaning Database ...")
-	if err := DB.Exec("DROP SCHEMA public CASCADE").Error; err != nil {
-		logger.Fatalf("Schema drop failed: %v", err)
+	statements := []string{
+		"DROP SCHEMA public CASCADE",
+		"CREATE SCHEMA public",
 	}
-
-	if err := DB.Exec("CREATE SCHEMA public").Error; err != nil {
-		logger.Fatalf("Schema creation failed: %v", err)
+	for _, stmt := range statements {
+		if err := db.Exec(stmt).Error; err != nil {
+			logger.Fatalf("Schema operation failed: %v", err)
+		}
 	}
-
 	logger.Debugf("Database cleaned")
 }
 
-func migrateSchema() {
+func migrateSchema(db *gorm.DB) {
 	logger.Debugf("AutoMigrating Database ...")
-
-	if err := DB.AutoMigrate(
+	baseModels := []interface{}{
+		&AnimeGenre{},
+		&AnimeStaff{},
+		&AnimeCharacter{},
+		&AnimeStudio{},
+		&AnimeTag{},
 		&Anime{},
+		&CharacterVoiceActor{}, // Add this line to explicitly include the join table
+	}
+	dependentModels := []interface{}{
+		&AnimeStaffJoin{},
+		&AnimeGenreJoin{},
+		&AnimeCharacterJoin{},
+		&AnimeStudioJoin{},
+		&AnimeTagJoin{},
 		&AnimeMapping{},
 		&AnimeTitle{},
-	); err != nil {
-		logger.Fatalf("Migration failed: %v", err)
+		&AnimeExternalLink{},
 	}
 
+	// Remove the SetupJoinTable call
+
+	if err := db.AutoMigrate(baseModels...); err != nil {
+		logger.Fatalf("Base tables migration failed: %v", err)
+	}
+	if err := db.AutoMigrate(dependentModels...); err != nil {
+		logger.Fatalf("Dependent tables migration failed: %v", err)
+	}
 	logger.Infof("Database Migration Complete")
 }

@@ -61,19 +61,12 @@ type anilistCharacter struct {
 	BloodType   string       `json:"bloodType"`
 }
 
-type anilistVoiceActor struct {
-	ID         int          `json:"id"`
-	Name       anilistName  `json:"name"`
-	LanguageV2 string       `json:"languageV2"`
-	Image      anilistImage `json:"image"`
-}
-
 type anilistCharacterEdge struct {
-	ID          int                 `json:"id"`
-	Role        string              `json:"role"`
-	Name        string              `json:"name"`
-	VoiceActors []anilistVoiceActor `json:"voiceActors"`
-	Node        anilistCharacter    `json:"node"`
+	ID          int              `json:"id"`
+	Role        string           `json:"role"`
+	Name        string           `json:"name"`
+	VoiceActors []anilistStaff   `json:"voiceActors"`
+	Node        anilistCharacter `json:"node"`
 }
 
 type anilistCharacterConnection struct {
@@ -92,6 +85,8 @@ type anilistStaff struct {
 	Age                int          `json:"age"`
 	YearsActive        []int        `json:"yearsActive"`
 	HomeTown           string       `json:"homeTown"`
+	BloodType          string       `json:"bloodType"`
+	Favourites         int          `json:"favourites"`
 }
 
 type anilistStaffEdge struct {
