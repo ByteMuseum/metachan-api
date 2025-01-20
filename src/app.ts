@@ -1,8 +1,9 @@
-// src/app.ts
 import express, { Request, Response, NextFunction } from 'express';
 import { initializeDatabase } from './database/data-source';
 import Logger from './utils/logger';
 import routes from './routes';
+import { taskManager } from './tasks/TaskManager';
+import { fribbSyncTask } from './tasks/FribbSyncTask';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -47,10 +48,17 @@ app.use((_req: Request, res: Response) => {
     });
 });
 
-// Start server
+// Initialize tasks and start server
 const startServer = async () => {
     try {
+        // Initialize database
         await initializeDatabase();
+
+        // Register and start tasks
+        taskManager.registerTask(fribbSyncTask);
+        await taskManager.startAllTasks();
+
+        // Start server
         app.listen(port, () => {
             Logger.success(`Server running at http://localhost:${port}`, {
                 timestamp: true,
@@ -66,6 +74,12 @@ const startServer = async () => {
         process.exit(1);
     }
 };
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+    taskManager.stopAllTasks();
+    process.exit(0);
+});
 
 startServer();
 

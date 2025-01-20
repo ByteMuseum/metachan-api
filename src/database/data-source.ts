@@ -7,7 +7,7 @@ const AppDataSource = new DataSource({
     type: "sqlite",
     database: "database.sqlite",
     synchronize: true,
-    logging: true,
+    logging: false,
     entities: [join(__dirname, "../entities/**/*.{ts,js}")],
     migrations: [join(__dirname, "../migrations/**/*.{ts,js}")],
     subscribers: [],

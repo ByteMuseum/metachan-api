@@ -1,4 +1,3 @@
-// src/repositories/BaseRepository.ts
 import { Repository, DeepPartial, FindOptionsWhere, ObjectLiteral } from "typeorm";
 import AppDataSource from "../database/data-source";
 import Logger from "../utils/logger";

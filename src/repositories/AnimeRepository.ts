@@ -1,4 +1,3 @@
-// src/repositories/AnimeRepository.ts
 import { Like } from "typeorm";
 import { BaseRepository } from "./BaseRepository";
 import { Anime } from "../entities/Anime";

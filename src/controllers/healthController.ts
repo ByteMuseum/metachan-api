@@ -1,6 +1,6 @@
-// src/controllers/healthController.ts
 import { Request, Response } from 'express';
 import { getDatabaseStatus } from '../database/data-source';
+import { taskManager } from '../tasks/TaskManager';
 import Logger from '../utils/logger';
 
 interface HealthStatus {
@@ -17,6 +17,12 @@ interface HealthStatus {
         status: 'connected' | 'disconnected';
         lastChecked: string;
     };
+    tasks: Record<string, {
+        registered: boolean;
+        running: boolean;
+        lastRun?: Date;
+        nextRun?: Date;
+    }>;
 }
 
 export const getHealthStatus = async (_req: Request, res: Response): Promise<void> => {
@@ -24,21 +30,23 @@ export const getHealthStatus = async (_req: Request, res: Response): Promise<voi
         const memoryUsage = process.memoryUsage();
         const uptimeInSeconds = process.uptime();
         const dbStatus = await getDatabaseStatus();
+        const tasksStatus = await taskManager.getAllTasksStatus();
 
         const status: HealthStatus = {
             status: dbStatus ? 'healthy' : 'unhealthy',
             timestamp: new Date().toISOString(),
             uptime: Math.floor(uptimeInSeconds),
             memory: {
-                used: Math.round(memoryUsage.heapUsed / 1024 / 1024), // MB
-                total: Math.round(memoryUsage.heapTotal / 1024 / 1024), // MB
-                free: Math.round((memoryUsage.heapTotal - memoryUsage.heapUsed) / 1024 / 1024), // MB
-                usage: Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100) // Percentage
+                used: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+                total: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+                free: Math.round((memoryUsage.heapTotal - memoryUsage.heapUsed) / 1024 / 1024),
+                usage: Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100)
             },
             database: {
                 status: dbStatus ? 'connected' : 'disconnected',
                 lastChecked: new Date().toISOString()
-            }
+            },
+            tasks: tasksStatus
         };
 
         Logger.info('Health check performed', {

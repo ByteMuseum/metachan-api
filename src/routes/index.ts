@@ -1,4 +1,3 @@
-// src/routes/index.ts
 import { Router, Request, Response } from 'express';
 import healthRoutes from './healthRoutes';
 

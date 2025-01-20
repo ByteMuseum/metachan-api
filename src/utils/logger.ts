@@ -1,4 +1,3 @@
-// src/utils/logger.ts
 import chalk from 'chalk';
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug' | 'success';
