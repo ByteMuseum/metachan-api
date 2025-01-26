@@ -1,19 +1,19 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
 
 @Entity()
 export class TaskLog {
-    @PrimaryGeneratedColumn()
-    id: number;
+  @PrimaryGeneratedColumn()
+  id: number;
 
-    @Column()
-    taskName: string;
+  @Column()
+  taskName: string;
 
-    @Column()
-    status: 'success' | 'error';
+  @Column()
+  status: 'success' | 'error';
 
-    @Column({ type: 'text', nullable: true })
-    error?: string;
+  @Column({ type: 'text', nullable: true })
+  error?: string;
 
-    @CreateDateColumn()
-    executedAt: Date;
+  @CreateDateColumn()
+  executedAt: Date;
 }
