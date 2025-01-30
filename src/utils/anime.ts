@@ -708,6 +708,8 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
     episodes.length > malAnime.data.data.episodes
   ) {
     episodes = episodes.slice(0, malAnime.data.data.episodes);
+    streamingEpisodes.sub = streamingEpisodes.sub.slice(0, malAnime.data.data.episodes);
+    streamingEpisodes.dub = streamingEpisodes.dub.slice(0, malAnime.data.data.episodes);
   }
 
   let seasons = [];
