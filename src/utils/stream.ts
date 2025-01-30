@@ -51,7 +51,6 @@ interface EpisodeResponse {
 interface StreamLink {
   url: string;
   type: string;
-  isDirect: boolean;
 }
 
 export interface StreamLinks {
@@ -223,13 +222,9 @@ function processSourceURL(sourceURL: string, sourceType: string): StreamLink {
 
   const processedURL = processProviderURL(decodedURL);
 
-  const directPatterns = ['fast4speed.rsvp', 'sharepoint.com', '.m3u8', '.mp4'];
-  const isDirect = directPatterns.some((pattern) => processedURL.includes(pattern));
-
   return {
     url: processedURL,
     type: getServerName(sourceType),
-    isDirect,
   };
 }
 
@@ -467,6 +462,10 @@ export async function getEpisodeStreamingLinks(
       const modeLinks: StreamLink[] = [];
 
       for (const source of sourceUrls) {
+        if (!source.sourceUrl) {
+          continue;
+        }
+
         let processedLink = processSourceURL(source.sourceUrl, source.sourceName);
 
         if (processedLink.url.includes('/apivtwo/clock')) {
@@ -475,14 +474,18 @@ export async function getEpisodeStreamingLinks(
             processedLink = {
               url: resolvedClockLink,
               type: processedLink.type,
-              isDirect: true,
             };
           } else {
             continue;
           }
         }
 
-        if (processedLink.isDirect) {
+        const validPatterns = ['sharepoint.com', '.m3u8', '.mp4', 'fast4speed.rsvp'];
+        const isValidLink = validPatterns.some((pattern) =>
+          processedLink.url.toLowerCase().includes(pattern),
+        );
+
+        if (isValidLink) {
           modeLinks.push(processedLink);
         }
       }
