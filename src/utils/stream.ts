@@ -50,7 +50,7 @@ interface EpisodeResponse {
 
 interface StreamLink {
   url: string;
-  type: string;
+  server: string;
 }
 
 export interface StreamLinks {
@@ -224,7 +224,7 @@ function processSourceURL(sourceURL: string, sourceType: string): StreamLink {
 
   return {
     url: processedURL,
-    type: getServerName(sourceType),
+    server: getServerName(sourceType),
   };
 }
 
@@ -471,10 +471,7 @@ export async function getEpisodeStreamingLinks(
         if (processedLink.url.includes('/apivtwo/clock')) {
           const resolvedClockLink = await getClockLink(processedLink.url);
           if (resolvedClockLink) {
-            processedLink = {
-              url: resolvedClockLink,
-              type: processedLink.type,
-            };
+            processedLink.url = resolvedClockLink;
           } else {
             continue;
           }
