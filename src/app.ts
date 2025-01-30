@@ -4,7 +4,7 @@ import Logger from './utils/logger';
 import routes from './routes';
 import { taskManager } from './tasks/TaskManager';
 import { fribbSyncTask } from './tasks/FribbSyncTask';
-import { animeCacheSyncTask } from './tasks/AnimeCacheSyncTask';
+// import { animeCacheSyncTask } from './tasks/AnimeCacheSyncTask';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -78,7 +78,7 @@ process.on('SIGTERM', () => {
 
 // Register tasks
 taskManager.registerTask(fribbSyncTask);
-taskManager.registerTask(animeCacheSyncTask);
+// taskManager.registerTask(animeCacheSyncTask);
 
 // Start server and tasks
 startServer().then(async () => {

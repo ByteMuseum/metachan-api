@@ -702,6 +702,14 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
     }
   }
 
+  if (
+    malAnime.data.data.status === 'Finished Airing' &&
+    malAnime.data.data.episodes &&
+    episodes.length > malAnime.data.data.episodes
+  ) {
+    episodes = episodes.slice(0, malAnime.data.data.episodes);
+  }
+
   let seasons = [];
   if (tvdbInfo?.data?.seasons) {
     const seasonMappings = await fribbMappingRepository.findByTVDBId(fribbMapping.thetvdb_id);
