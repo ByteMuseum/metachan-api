@@ -1,6 +1,60 @@
 import axios, { AxiosError } from 'axios';
 import Logger from './logger';
 
+export interface TVDBEpisode {
+  id: number;
+  seriesId: number;
+  name: string;
+  aired: string;
+  runtime: number;
+  nameTranslations: string[];
+  overview: string;
+  image: string;
+  overviewTranslations: Array<{
+    language: string;
+    overview: string;
+  }>;
+  imageType: number;
+  seasonNumber: number;
+  number: number;
+  lastUpdated: string;
+  finaleType: string;
+  airsAfterSeason: number;
+  airsBeforeSeason: number;
+  airsBeforeEpisode: number;
+  thumbWidth: string;
+  thumbHeight: string;
+  companies: {
+    studio: null;
+    network: null;
+    production: null;
+    distributor: null;
+    special_effects: null;
+  };
+  seasons: {
+    id: number;
+    seriesId: number;
+    type: {
+      id: number;
+      name: string;
+      type: string;
+      alternateName: string | null;
+    };
+    number: number;
+  };
+}
+
+interface TVDBEpisodesResponse {
+  status: 'success' | 'error';
+  data: {
+    series: {
+      id: number;
+      name: string;
+    };
+    episodes: TVDBEpisode[];
+  };
+}
+
 interface TVDBConfig {
   apiKey: string;
   pin?: string;
@@ -189,7 +243,7 @@ export class TVDBClient {
       this.token = token;
       this.tokenExpiry = new Date(expiresAt).getTime();
 
-      Logger.info('TVDB Authentication successful', { timestamp: true, prefix: 'TVDB' });
+      Logger.debug('TVDB Authentication successful', { timestamp: true, prefix: 'TVDB' });
     } catch (error) {
       Logger.error('TVDB Authentication failed', { timestamp: true, prefix: 'TVDB' });
       throw error;
@@ -250,15 +304,47 @@ export class TVDBClient {
     return this.request<TVDBResponse>(`/series/${id}/extended`);
   }
 
-  async getAnimeEpisodes(id: number, season?: number) {
+  async getAnimeEpisodes(id: number, season?: number): Promise<TVDBEpisodesResponse> {
     Logger.debug(`Fetching episodes for anime: ${id}, season: ${season || 'all'}`, {
       timestamp: true,
       prefix: 'TVDB',
     });
+
     const endpoint = season
       ? `/series/${id}/episodes/official/${season}`
       : `/series/${id}/episodes/official`;
-    return this.request<TVDBResponse>(endpoint);
+
+    const response = await this.request<TVDBEpisodesResponse>(endpoint);
+
+    // Now fetch translations for each episode
+    if (response.data?.episodes) {
+      await Promise.all(
+        response.data.episodes.map(async (episode) => {
+          try {
+            // Fetch English translation
+            const engTranslation = await this.request<{ data: { overview: string } }>(
+              `/episodes/${episode.id}/translations/eng`,
+            );
+            // Fetch Japanese translation
+            const jpnTranslation = await this.request<{ data: { overview: string } }>(
+              `/episodes/${episode.id}/translations/jpn`,
+            );
+
+            episode.overviewTranslations = [
+              { language: 'eng', overview: engTranslation.data.overview },
+              { language: 'jpn', overview: jpnTranslation.data.overview },
+            ];
+          } catch (error) {
+            Logger.error(`Failed to fetch translations for episode ${episode.id}: ${error}`, {
+              timestamp: true,
+              prefix: 'TVDB',
+            });
+          }
+        }),
+      );
+    }
+
+    return response;
   }
 }
 

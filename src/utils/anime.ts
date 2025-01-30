@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { FribbMapping } from '../entities/FribbMapping';
 import Logger from './logger';
-import { TVDBClient } from './tvdb';
+import { TVDBClient, TVDBEpisode } from './tvdb';
 import { fribbMappingRepository } from '../repositories/FribbMappingRepository';
+import { getEpisodes } from './stream';
 
 const tvdbClient = new TVDBClient({
   apiKey: process.env.TVDB_API_KEY || '',
@@ -288,7 +289,7 @@ interface MALAnimeEpisodes {
   };
 }
 
-interface MALAnimeSmall {
+interface EmbeddedAnime {
   id: number;
   titles: {
     english: string;
@@ -381,20 +382,14 @@ interface SingleAnime {
     original: string;
   };
   trailer: string;
-  seasons: MALAnimeSmall[];
-  episodes: Array<{
-    id: number;
-    titles: {
-      english: string;
-      japanese: string;
-      romaji: string;
+  seasons: EmbeddedAnime[];
+  episodes: {
+    counts: {
+      sub: number;
+      dub: number;
     };
-    aired: string;
-    score: number | null;
-    filler: boolean;
-    recap: boolean;
-    forumUrl: string;
-  }>;
+    episodes: Array<AnimeEpisode>;
+  };
   characters: Array<{
     name: string;
     role: string;
@@ -405,6 +400,28 @@ interface SingleAnime {
       language: string;
     }>;
   }>;
+}
+
+interface AnimeEpisode {
+  id: number;
+  titles: {
+    english: string;
+    japanese: string;
+    romaji: string;
+  };
+  aired: string;
+  score: number | null;
+  duration: number | string | null;
+  synopsis: {
+    english: string;
+    japanese: string;
+  } | null;
+  filler: boolean;
+  recap: boolean;
+  forumUrl: string;
+  seasonNumber?: number;
+  number?: number;
+  image?: string;
 }
 
 export interface SearchQueryParams {
@@ -466,25 +483,26 @@ const fetchWithRetry = async <T>(url: string, maxRetries = 10, initialDelay = 35
   throw new Error('Max retries exceeded');
 };
 
-const getAnimeEpisodes = async (
-  malId: number,
-  page = 1,
-  limit = 100,
-): Promise<ReturnType<typeof formatEpisode>[]> => {
-  const formatEpisode = (episode: MALAnimeEpisodes['data'][0]) => ({
-    id: episode.mal_id,
-    titles: {
-      english: episode.title,
-      japanese: episode.title_japanese,
-      romaji: episode.title_romanji,
-    },
-    aired: episode.aired,
-    score: episode.score,
-    filler: episode.filler,
-    recap: episode.recap,
-    forumUrl: episode.forum_url,
-  });
+const formatEpisode = (episode: MALAnimeEpisodes['data'][0]): AnimeEpisode => ({
+  id: episode.mal_id,
+  titles: {
+    english: episode.title,
+    japanese: episode.title_japanese,
+    romaji: episode.title_romanji,
+  },
+  aired: episode.aired,
+  score: episode.score,
+  duration: null,
+  synopsis: null,
+  filler: episode.filler,
+  recap: episode.recap,
+  forumUrl: episode.forum_url,
+  seasonNumber: undefined,
+  number: undefined,
+  image: undefined,
+});
 
+const getAnimeEpisodes = async (malId: number, page = 1, limit = 100): Promise<AnimeEpisode[]> => {
   const episodes = await fetchWithRetry<MALAnimeEpisodes>(
     `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}&limit=${limit}`,
   );
@@ -503,7 +521,7 @@ const getAnimeEpisodes = async (
   return formattedEpisodes;
 };
 
-const getBasicMALInfo = async (malId: number): Promise<MALAnimeSmall | null> => {
+const getBasicMALInfo = async (malId: number): Promise<EmbeddedAnime | null> => {
   const anime = await fetchWithRetry<MALAnime>(`https://api.jikan.moe/v4/anime/${malId}`);
 
   if (!anime.data) return null;
@@ -535,6 +553,55 @@ const getBasicMALInfo = async (malId: number): Promise<MALAnimeSmall | null> => 
     season: anime.data.season,
     year: anime.data.year,
   };
+};
+
+const mergeTVDBEpisodes = (
+  malEpisodes: AnimeEpisode[],
+  tvdbEpisodes: TVDBEpisode[],
+): AnimeEpisode[] => {
+  // Filter only main season episodes (not specials)
+  const mainEpisodes = tvdbEpisodes
+    .filter((ep) => ep.seasonNumber === 1 && ep.number && ep.number <= malEpisodes.length)
+    .sort((a, b) => a.number - b.number);
+
+  return malEpisodes.map((malEpisode, index) => {
+    const tvdbEpisode = mainEpisodes.find((ep) => ep.number === index + 1);
+
+    if (!tvdbEpisode) {
+      return malEpisode;
+    }
+
+    // Get English translation
+    const englishOverview =
+      tvdbEpisode.overviewTranslations?.find((t) => t.language === 'eng')?.overview || '';
+
+    // Get Japanese translation
+    const japaneseOverview =
+      tvdbEpisode.overviewTranslations?.find((t) => t.language === 'jpn')?.overview ||
+      tvdbEpisode.overview ||
+      '';
+
+    return {
+      ...malEpisode,
+      duration: tvdbEpisode.runtime ? `${tvdbEpisode.runtime} mins` : 'N/A',
+      synopsis: {
+        english: englishOverview,
+        japanese: japaneseOverview,
+      },
+      image: tvdbEpisode.image,
+      seasonNumber: tvdbEpisode.seasonNumber,
+      number: tvdbEpisode.number,
+    };
+  });
+};
+
+export const getBasicAnime = async (fribbMapping: FribbMapping): Promise<EmbeddedAnime | null> => {
+  const malAnime = await getBasicMALInfo(fribbMapping.mal_id);
+  if (!malAnime) {
+    return null;
+  }
+
+  return malAnime;
 };
 
 export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAnime | null> => {
@@ -577,9 +644,68 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
   const animeEpisodes = await getAnimeEpisodes(fribbMapping.mal_id);
 
   let tvdbInfo = null;
+  let episodes = animeEpisodes;
+
   if (fribbMapping.thetvdb_id) {
     tvdbInfo = await tvdbClient.getAnimeById(fribbMapping.thetvdb_id);
+    try {
+      const tvdbEpisodesResponse = await tvdbClient.getAnimeEpisodes(fribbMapping.thetvdb_id);
+      if (tvdbEpisodesResponse?.data?.episodes) {
+        episodes = mergeTVDBEpisodes(animeEpisodes, tvdbEpisodesResponse.data.episodes);
+      }
+    } catch (error) {
+      Logger.error(
+        `Failed to fetch TVDB episodes: ${error instanceof Error ? error.message : String(error)}`,
+        {
+          prefix: 'Anime',
+          timestamp: true,
+        },
+      );
+    }
   }
+
+  const title =
+    kitsuAnime.data.data[0].attributes.canonicalTitle ||
+    kitsuAnime.data.data[0].attributes.titles.en ||
+    kitsuAnime.data.data[0].attributes.titles.ja_jp;
+  const streamingEpisodes = await getEpisodes(title);
+
+  if (
+    episodes.length !== streamingEpisodes.sub.length ||
+    streamingEpisodes.sub.length > episodes.length
+  ) {
+    Logger.info(`Filling missing episodes for ${title}`, { prefix: 'Anime Episodes' });
+    const remainingEpisodes = streamingEpisodes.sub.length - episodes.length;
+    Logger.debug(`Missing episodes: ${remainingEpisodes}`, { prefix: 'Anime Episodes' });
+    for (let i = 0; i < remainingEpisodes; i++) {
+      episodes.push({
+        id: episodes.length + i + 1,
+        titles: {
+          romaji: 'Episode ' + (i + episodes.length + 1),
+          english: 'Episode ' + (i + episodes.length + 1),
+          japanese: 'エピソード ' + (i + episodes.length + 1),
+        },
+        aired: 'Unknown',
+        score: 0,
+        duration: episodes.length > 0 ? `${episodes[0].duration}` : 'Unknown',
+        synopsis: {
+          english: 'No synopsis available',
+          japanese: 'シノプシスはありません',
+        },
+        filler: false,
+        recap: false,
+        forumUrl: '',
+        seasonNumber: 1,
+        number: i + episodes.length + 1,
+        image:
+          kitsuAnime.data.data[0].attributes.coverImage?.original ??
+          kitsuAnime.data.data[0].attributes.posterImage?.original ??
+          malAnime.data.data.images.jpg.image_url ??
+          '',
+      });
+    }
+  }
+
   let seasons = [];
   if (tvdbInfo?.data?.seasons) {
     const seasonMappings = await fribbMappingRepository.findByTVDBId(fribbMapping.thetvdb_id);
@@ -682,24 +808,13 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
       const bDate = new Date(b.aired.from);
       return aDate.getTime() - bDate.getTime();
     }),
-    episodes:
-      animeEpisodes.length === 0
-        ? [
-            {
-              id: 1,
-              titles: {
-                english: kitsuAnime.data.data[0].attributes.titles.en,
-                japanese: kitsuAnime.data.data[0].attributes.titles.ja_jp,
-                romaji: kitsuAnime.data.data[0].attributes.canonicalTitle,
-              },
-              aired: malAnime.data.data.aired.from,
-              score: malAnime.data.data.score,
-              filler: false,
-              recap: false,
-              forumUrl: `https://api.jikan.moe/v4/anime/${fribbMapping.mal_id}/forum`,
-            },
-          ]
-        : animeEpisodes,
+    episodes: {
+      counts: {
+        sub: streamingEpisodes.sub.length,
+        dub: streamingEpisodes.dub.length,
+      },
+      episodes,
+    },
     characters,
   };
 
@@ -719,7 +834,7 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
 };
 
 interface AnimeSearchResult {
-  results: Array<MALAnimeSmall>;
+  results: Array<EmbeddedAnime>;
   meta: {
     count: number;
     total: number;
@@ -727,20 +842,6 @@ interface AnimeSearchResult {
     currentPage: number;
     lastPage: number;
     hasNextPage: boolean;
-  };
-}
-
-interface JikanSearchResponse {
-  data: Array<MALAnime['data']>;
-  pagination: {
-    last_visible_page: number;
-    has_next_page: boolean;
-    current_page: number;
-    items: {
-      count: number;
-      total: number;
-      per_page: number;
-    };
   };
 }
 
