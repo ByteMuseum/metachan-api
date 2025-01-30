@@ -66,7 +66,7 @@ export const searchAnime = async (req: Request, res: Response): Promise<void> =>
       letter,
       producers,
       start_date,
-      end_date
+      end_date,
     } = req.query;
 
     // Type validation for numeric parameters
@@ -80,7 +80,7 @@ export const searchAnime = async (req: Request, res: Response): Promise<void> =>
       max_score: max_score ? parseFloat(max_score as string) : undefined,
       status: status as SearchQueryParams['status'],
       rating: rating as SearchQueryParams['rating'],
-      sfw: sfw ? (sfw === 'true') : undefined,
+      sfw: sfw ? sfw === 'true' : undefined,
       genres: genres as string,
       genres_exclude: genres_exclude as string,
       order_by: order_by as SearchQueryParams['order_by'],
@@ -88,13 +88,16 @@ export const searchAnime = async (req: Request, res: Response): Promise<void> =>
       letter: letter as string,
       producers: producers as string,
       start_date: start_date as string,
-      end_date: end_date as string
+      end_date: end_date as string,
     };
 
     const results = await searchAnimeQuery(searchParams);
     res.json(results);
   } catch (error) {
-    Logger.error(error instanceof Error ? error : 'Error processing search request', { prefix: 'Anime Search', timestamp: true });
+    Logger.error(error instanceof Error ? error : 'Error processing search request', {
+      prefix: 'Anime Search',
+      timestamp: true,
+    });
     res.status(500).json({ error: 'Internal server error' });
   }
 };
