@@ -10,6 +10,7 @@ router.get('/', (_req: Request, res: Response) => {
     message: 'MetaChan API v1',
     endpoints: {
       health: '/health',
+      anime: '/anime',
     },
   });
 });

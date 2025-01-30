@@ -1,11 +1,95 @@
 import { Request, Response } from 'express';
 import Logger from '../utils/logger';
 import { FribbMappingRepository } from '../repositories/FribbMappingRepository';
-import { getFullAnime, searchAnimeQuery } from '../utils/anime';
+import { getFullAnime, getTopAnime, searchAnimeQuery } from '../utils/anime';
 import type { SearchQueryParams } from '../utils/anime';
 import { getEpisodeStreamingLinks } from '../utils/stream';
 
 const fribbMappingRepository = new FribbMappingRepository();
+
+export const topAiring = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { page = 1, limit = 25, type } = req.query;
+    const filter = 'airing';
+
+    const results = await getTopAnime(
+      type as 'tv' | 'movie' | 'ova' | 'special' | 'ona' | 'music' | 'cm' | 'pv' | 'tv_special',
+      filter,
+      parseInt(page as string, 10),
+      parseInt(limit as string, 10),
+    );
+    res.json(results);
+  } catch (error) {
+    Logger.error(error instanceof Error ? error : 'Error processing top airing request', {
+      prefix: 'Anime',
+      timestamp: true,
+    });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const topUpcoming = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { page = 1, limit = 25, type } = req.query;
+    const filter = 'upcoming';
+
+    const results = await getTopAnime(
+      type as 'tv' | 'movie' | 'ova' | 'special' | 'ona' | 'music' | 'cm' | 'pv' | 'tv_special',
+      filter,
+      parseInt(page as string, 10),
+      parseInt(limit as string, 10),
+    );
+    res.json(results);
+  } catch (error) {
+    Logger.error(error instanceof Error ? error : 'Error processing top upcoming request', {
+      prefix: 'Anime',
+      timestamp: true,
+    });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const topPopular = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { page = 1, limit = 25, type } = req.query;
+    const filter = 'bypopularity';
+
+    const results = await getTopAnime(
+      type as 'tv' | 'movie' | 'ova' | 'special' | 'ona' | 'music' | 'cm' | 'pv' | 'tv_special',
+      filter,
+      parseInt(page as string, 10),
+      parseInt(limit as string, 10),
+    );
+    res.json(results);
+  } catch (error) {
+    Logger.error(error instanceof Error ? error : 'Error processing top popular request', {
+      prefix: 'Anime',
+      timestamp: true,
+    });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const topFavorite = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { page = 1, limit = 25, type } = req.query;
+    const filter = 'favorite';
+
+    const results = await getTopAnime(
+      type as 'tv' | 'movie' | 'ova' | 'special' | 'ona' | 'music' | 'cm' | 'pv' | 'tv_special',
+      filter,
+      parseInt(page as string, 10),
+      parseInt(limit as string, 10),
+    );
+    res.json(results);
+  } catch (error) {
+    Logger.error(error instanceof Error ? error : 'Error processing top favorite request', {
+      prefix: 'Anime',
+      timestamp: true,
+    });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
 
 export const getAnime = async (req: Request, res: Response): Promise<void> => {
   const malId = req.params.id;
@@ -96,7 +180,7 @@ export const searchAnime = async (req: Request, res: Response): Promise<void> =>
     res.json(results);
   } catch (error) {
     Logger.error(error instanceof Error ? error : 'Error processing search request', {
-      prefix: 'Anime Search',
+      prefix: 'Anime',
       timestamp: true,
     });
     res.status(500).json({ error: 'Internal server error' });

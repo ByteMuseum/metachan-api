@@ -29,6 +29,15 @@ interface HealthStatus {
 }
 
 export const getHealthStatus = async (_req: Request, res: Response): Promise<void> => {
+  const authorizationHeader = _req.headers.authorization;
+  if (authorizationHeader !== process.env.HEALTH_AUTH_TOKEN) {
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid or missing authorization token',
+    });
+    return;
+  }
+
   try {
     const memoryUsage = process.memoryUsage();
     const uptimeInSeconds = process.uptime();

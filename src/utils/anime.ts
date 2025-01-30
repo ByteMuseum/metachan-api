@@ -936,3 +936,81 @@ export const searchAnimeQuery = async (params: SearchQueryParams): Promise<Anime
     throw error;
   }
 };
+
+export const getTopAnime = async (
+  type: 'tv' | 'movie' | 'ova' | 'special' | 'ona' | 'music' | 'cm' | 'pv' | 'tv_special',
+  filter: 'airing' | 'upcoming' | 'bypopularity' | 'favorite',
+  page: number = 1,
+  limit: number = 10,
+): Promise<AnimeSearchResult> => {
+  try {
+    let url = `https://api.jikan.moe/v4/top/anime?page=${page}&limit=${limit}`;
+    if (type) {
+      url += `&type=${type}`;
+    }
+    if (filter) {
+      url += `&filter=${filter}`;
+    }
+
+    const response = await axios.get<JikanSearchResponse>(url);
+    const jikanSearchResponse = response.data;
+
+    // Use a Map to deduplicate by id while mapping
+    const uniqueResults = new Map(
+      jikanSearchResponse.data.map((anime) => [
+        anime.mal_id,
+        {
+          id: anime.mal_id,
+          titles: {
+            english: anime.title_english,
+            japanese: anime.title_japanese,
+            romaji: anime.title,
+          },
+          type: anime.type,
+          status: anime.status,
+          airing: anime.airing,
+          aired: {
+            from: anime.aired.from,
+            to: anime.aired.to,
+          },
+          ranks: {
+            scores: {
+              average: anime.score,
+              users: anime.scored_by,
+            },
+            ranked: anime.rank,
+            popularity: anime.popularity,
+            members: anime.members,
+            favorites: anime.favorites,
+          },
+          season: anime.season,
+          year: anime.year,
+        },
+      ]),
+    );
+
+    const results = Array.from(uniqueResults.values());
+    Logger.info(`Found ${results.length} unique results for top anime query`, {
+      prefix: 'Top Anime',
+      timestamp: true,
+    });
+
+    return {
+      results,
+      meta: {
+        count: results.length,
+        total: results.length,
+        perPage: jikanSearchResponse.pagination.items.per_page,
+        currentPage: jikanSearchResponse.pagination.current_page,
+        lastPage: jikanSearchResponse.pagination.last_visible_page,
+        hasNextPage: jikanSearchResponse.pagination.has_next_page,
+      },
+    };
+  } catch (error) {
+    Logger.error(error instanceof Error ? error : `Top anime query failed`, {
+      prefix: 'Top Anime',
+      timestamp: true,
+    });
+    throw error;
+  }
+};
