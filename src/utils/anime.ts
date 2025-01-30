@@ -4,6 +4,7 @@ import Logger from './logger';
 import { TVDBClient, TVDBEpisode } from './tvdb';
 import { fribbMappingRepository } from '../repositories/FribbMappingRepository';
 import { getEpisodes } from './stream';
+import { animeCacheRepository } from '../repositories/AnimeCacheRepository';
 
 const tvdbClient = new TVDBClient({
   apiKey: process.env.TVDB_API_KEY || '',
@@ -318,7 +319,7 @@ interface EmbeddedAnime {
   current?: boolean;
 }
 
-interface SingleAnime {
+export interface SingleAnime {
   id: number;
   titles: {
     english: string;
@@ -455,9 +456,6 @@ export interface SearchQueryParams {
   start_date?: string;
   end_date?: string;
 }
-
-// const localCache: { [key: number]: Promise<SingleAnime | null> } = {};
-const localCache: { [key: number]: { anime: SingleAnime | null; expiresAt: number } } = {};
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -605,11 +603,9 @@ export const getBasicAnime = async (fribbMapping: FribbMapping): Promise<Embedde
 };
 
 export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAnime | null> => {
-  if (fribbMapping.mal_id in localCache) {
-    const cached = await localCache[fribbMapping.mal_id];
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.anime;
-    }
+  const cached = await animeCacheRepository.getCachedAnime(fribbMapping.mal_id);
+  if (cached) {
+    return cached;
   }
 
   const malAnime = await axios.get<MALAnime>(
@@ -818,17 +814,8 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
     characters,
   };
 
-  if (animeResponse.status === 'Finished Airing') {
-    localCache[fribbMapping.mal_id] = {
-      anime: animeResponse,
-      expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 30,
-    };
-  } else {
-    localCache[fribbMapping.mal_id] = {
-      anime: animeResponse,
-      expiresAt: Date.now() + 1000 * 60 * 60 * 24,
-    };
-  }
+  const cacheExpiryDays = animeResponse.status === 'Finished Airing' ? 30 : 1;
+  await animeCacheRepository.cacheAnime(fribbMapping.mal_id, animeResponse, cacheExpiryDays);
 
   return animeResponse;
 };

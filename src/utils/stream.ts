@@ -1,3 +1,4 @@
+import { animeCacheRepository } from '../repositories/AnimeCacheRepository';
 import Logger from './logger';
 
 interface AvailableEpisodes {
@@ -53,7 +54,7 @@ interface StreamLink {
   isDirect: boolean;
 }
 
-interface StreamLinks {
+export interface StreamLinks {
   sub: StreamLink[];
   dub: StreamLink[];
 }
@@ -348,7 +349,15 @@ export async function getEpisodes(animeName: string): Promise<EpisodeInfo> {
 export async function getEpisodeStreamingLinks(
   animeName: string,
   episode: number,
+  malId?: number,
 ): Promise<StreamLinks> {
+  if (malId) {
+    const cached = await animeCacheRepository.getCachedStreamingLinks(malId, episode);
+    if (cached) {
+      return cached;
+    }
+  }
+
   try {
     const headers = new Headers({
       'User-Agent': USER_AGENT,
@@ -493,6 +502,14 @@ export async function getEpisodeStreamingLinks(
       `Found ${streamLinks.sub.length} sub and ${streamLinks.dub.length} dub links for ${animeName} - Episode ${episode}`,
       { timestamp: true, prefix: 'Anime Stream' },
     );
+
+    if (malId) {
+      await animeCacheRepository.cacheStreamingLinks(malId, episode, streamLinks);
+      Logger.info(`Cached streaming links for ${animeName} episode ${episode}`, {
+        timestamp: true,
+        prefix: 'Stream Cache',
+      });
+    }
 
     return streamLinks;
   } catch (error) {

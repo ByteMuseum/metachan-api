@@ -4,6 +4,7 @@ import Logger from './utils/logger';
 import routes from './routes';
 import { taskManager } from './tasks/TaskManager';
 import { fribbSyncTask } from './tasks/FribbSyncTask';
+import { animeCacheSyncTask } from './tasks/AnimeCacheSyncTask';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -52,10 +53,6 @@ const startServer = async () => {
     // Initialize database
     await initializeDatabase();
 
-    // Register and start tasks
-    taskManager.registerTask(fribbSyncTask);
-    await taskManager.startAllTasks();
-
     // Start server
     app.listen(port, () => {
       Logger.success(`Server running at http://localhost:${port}`, {
@@ -79,6 +76,13 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-startServer();
+// Register tasks
+taskManager.registerTask(fribbSyncTask);
+taskManager.registerTask(animeCacheSyncTask);
+
+// Start server and tasks
+startServer().then(async () => {
+  await taskManager.startAllTasks();
+});
 
 export default app;

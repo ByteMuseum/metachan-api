@@ -135,15 +135,16 @@ export const episodeStreamingLinks = async (req: Request, res: Response): Promis
     return;
   }
 
-  const fribbMapping = await fribbMappingRepository.findByMalId(parseInt(id));
+  const malId = parseInt(id);
+  const episodeNumber = parseInt(number);
+
+  const fribbMapping = await fribbMappingRepository.findByMalId(malId);
   if (!fribbMapping) {
     res.status(404).json({ message: 'Anime not found' });
     return;
   }
 
-  const episodeNumber = parseInt(number) ?? 1;
   const anime = await getFullAnime(fribbMapping);
-
   if (!anime) {
     res.status(404).json({ message: 'Anime not found on Jikan' });
     return;
@@ -155,13 +156,12 @@ export const episodeStreamingLinks = async (req: Request, res: Response): Promis
     return;
   }
 
-  const links = await getEpisodeStreamingLinks(title, episodeNumber);
-  if (!links) {
+  const links = await getEpisodeStreamingLinks(title, episodeNumber, malId);
+  if (!links.sub.length && !links.dub.length) {
     res.status(404).json({ message: 'No streaming links found' });
     return;
   }
 
   let episodeMetadata = anime.episodes.episodes.find((episode) => episode.number === episodeNumber);
-
   res.json({ ...episodeMetadata, streamingLinks: links });
 };
