@@ -18,7 +18,7 @@ class Logger {
   private static formatMessage(message: string, level: LogLevel, options?: LogOptions): string {
     const parts: string[] = [];
 
-    if (options?.timestamp) {
+    if (options?.timestamp && process.env.NODE_ENV !== 'production') {
       parts.push(chalk.gray(this.getTimestamp()));
     }
 
