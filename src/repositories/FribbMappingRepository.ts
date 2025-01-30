@@ -40,6 +40,24 @@ export class FribbMappingRepository extends BaseRepository<FribbMapping> {
       throw error;
     }
   }
+
+  async findByAnilistId(anilistId: number): Promise<FribbMapping | undefined> {
+    try {
+      return (
+        (await this.repository.findOne({
+          where: {
+            anilist_id: anilistId,
+          },
+        })) ?? undefined
+      );
+    } catch (error) {
+      Logger.error('Error finding fribb mapping by Anilist ID', {
+        timestamp: true,
+        prefix: 'Database',
+      });
+      throw error;
+    }
+  }
 }
 
 export const fribbMappingRepository = new FribbMappingRepository();
