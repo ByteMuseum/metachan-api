@@ -1,5 +1,10 @@
+import { findBestMatch } from 'string-similarity';
+import { ANIME } from '@consumet/extensions';
 import { animeCacheRepository } from '../repositories/AnimeCacheRepository';
 import Logger from './logger';
+import axios from 'axios';
+
+const Zoro = new ANIME.Zoro('https://hianime.to');
 
 interface AvailableEpisodes {
   sub: number;
@@ -53,9 +58,50 @@ interface StreamLink {
   server: string;
 }
 
-export interface StreamLinks {
+interface StreamLinks {
   sub: StreamLink[];
   dub: StreamLink[];
+}
+
+export interface EpisodeStreamLinks {
+  sub: {
+    intro: {
+      start: number;
+      end: number;
+    };
+    outro: {
+      start: number;
+      end: number;
+    };
+    sources: {
+      url: string;
+      server: string;
+    }[];
+    captions: {
+      url: string;
+      lang: string;
+    }[];
+    thumbnails?: string;
+  };
+  dub: {
+    intro: {
+      start: number;
+      end: number;
+    };
+    outro: {
+      start: number;
+      end: number;
+    };
+    sources: {
+      url: string;
+      server: string;
+    }[];
+    captions: {
+      url: string;
+      lang: string;
+    }[];
+    thumbnails?: string;
+  };
 }
 
 interface EpisodeInfo {
@@ -228,6 +274,123 @@ function processSourceURL(sourceURL: string, sourceType: string): StreamLink {
   };
 }
 
+async function getZoroLinks(title: string, episode: number): Promise<EpisodeStreamLinks> {
+  const defaultLinks: EpisodeStreamLinks = {
+    sub: {
+      intro: { start: 0, end: 0 },
+      outro: { start: 0, end: 0 },
+      sources: [],
+      captions: [],
+    },
+    dub: {
+      intro: { start: 0, end: 0 },
+      outro: { start: 0, end: 0 },
+      sources: [],
+      captions: [],
+    },
+  };
+  try {
+    const results = (await Zoro.search(title)).results;
+    if (results.length === 0) {
+      Logger.warn(`No anime found for query: ${title} on Zoro`, {
+        timestamp: true,
+        prefix: 'Anime Stream',
+      });
+      return defaultLinks;
+    }
+
+    const bestMatch = findBestMatch(
+      title,
+      results.map((result) => result.japaneseTitle),
+    ).bestMatch;
+
+    const anime = results.find((result) => result.japaneseTitle === bestMatch.target);
+    if (!anime?.id) {
+      return defaultLinks;
+    }
+    const episodes = await Zoro.fetchAnimeInfo(anime.id);
+    if (!episodes?.episodes) {
+      return defaultLinks;
+    }
+    const episodeInfo = episodes.episodes.find((ep) => ep.number === episode);
+    if (!episodeInfo) {
+      return defaultLinks;
+    }
+
+    // Replace $both in id with $sub and $dub, then consumet.thatcomputerscientist.com/meta/anilist/watch/<ids>?provider=zoro
+    // to get the streaming links for both sub and dub
+    const subId = episodeInfo.id.replace('$both', '$sub');
+    const dubId = episodeInfo.id.replace('$both', '$dub');
+
+    const subResponse = await axios.get(
+      `${process.env.CONSUMET_URL}/meta/anilist/watch/${subId}?provider=zoro`,
+    );
+    const dubResponse = await axios.get(
+      `${process.env.CONSUMET_URL}/meta/anilist/watch/${dubId}?provider=zoro`,
+    );
+
+    const subData = subResponse.data;
+    const dubData = dubResponse.data;
+
+    if (!subData && !dubData) {
+      return defaultLinks;
+    }
+
+    defaultLinks.sub.intro.start = subData.intro.start;
+    defaultLinks.sub.intro.end = subData.intro.end;
+    defaultLinks.sub.outro.start = subData.outro.start;
+    defaultLinks.sub.outro.end = subData.outro.end;
+    defaultLinks.dub.intro.start = dubData.intro.start;
+    defaultLinks.dub.intro.end = dubData.intro.end;
+    defaultLinks.dub.outro.start = dubData.outro.start;
+    defaultLinks.dub.outro.end = dubData.outro.end;
+
+    for (const source of subData.sources) {
+      defaultLinks.sub.sources.push({
+        url: source.url,
+        server: getServerName('Default'),
+      });
+    }
+
+    for (const source of dubData.sources) {
+      defaultLinks.dub.sources.push({
+        url: source.url,
+        server: getServerName('Default'),
+      });
+    }
+
+    for (const caption of subData.subtitles) {
+      if (caption.lang === 'thumbnails') {
+        defaultLinks.sub.thumbnails = caption.url;
+      } else {
+        defaultLinks.sub.captions.push({
+          url: caption.url,
+          lang: caption.lang,
+        });
+      }
+    }
+
+    for (const caption of dubData.subtitles) {
+      if (caption.lang === 'thumbnails') {
+        defaultLinks.dub.thumbnails = caption.url;
+      } else {
+        defaultLinks.dub.captions.push({
+          url: caption.url,
+          lang: caption.lang,
+        });
+      }
+    }
+
+    return defaultLinks;
+  } catch (error) {
+    Logger.error(`Error fetching Zoro streaming links: ${error}`, {
+      timestamp: true,
+      prefix: 'Anime Stream',
+    });
+    return defaultLinks;
+  }
+}
+
 export async function getEpisodes(animeName: string): Promise<EpisodeInfo> {
   try {
     const headers = new Headers({
@@ -345,7 +508,7 @@ export async function getEpisodeStreamingLinks(
   animeName: string,
   episode: number,
   malId?: number,
-): Promise<StreamLinks> {
+): Promise<EpisodeStreamLinks> {
   if (malId) {
     const cached = await animeCacheRepository.getCachedStreamingLinks(malId, episode);
     if (cached) {
@@ -419,7 +582,20 @@ export async function getEpisodeStreamingLinks(
         timestamp: true,
         prefix: 'Anime Stream',
       });
-      return { sub: [], dub: [] };
+      return {
+        sub: {
+          intro: { start: 0, end: 0 },
+          outro: { start: 0, end: 0 },
+          sources: [],
+          captions: [],
+        },
+        dub: {
+          intro: { start: 0, end: 0 },
+          outro: { start: 0, end: 0 },
+          sources: [],
+          captions: [],
+        },
+      };
     }
 
     const bestMatch = sortedShows[0];
@@ -477,10 +653,20 @@ export async function getEpisodeStreamingLinks(
           }
         }
 
-        const validPatterns = ['sharepoint.com', '.m3u8', '.mp4', 'fast4speed.rsvp'];
+        const validPatterns = ['sharepoint.com', '.m3u8', '.mp4'];
         const isValidLink = validPatterns.some((pattern) =>
           processedLink.url.toLowerCase().includes(pattern),
         );
+
+        // These patterns are no longer active now and these servers are shut down
+        const patternsToRemove = ['fast4speed.rsvp'];
+        const shouldRemove = patternsToRemove.some((pattern) =>
+          processedLink.url.toLowerCase().includes(pattern),
+        );
+
+        if (shouldRemove) {
+          continue;
+        }
 
         if (isValidLink) {
           modeLinks.push(processedLink);
@@ -503,20 +689,37 @@ export async function getEpisodeStreamingLinks(
       { timestamp: true, prefix: 'Anime Stream' },
     );
 
+    const zoroStremingLinks = await getZoroLinks(animeName, episode);
+    zoroStremingLinks.sub.sources.push(...streamLinks.sub);
+    zoroStremingLinks.dub.sources.push(...streamLinks.dub);
+
     if (malId) {
-      await animeCacheRepository.cacheStreamingLinks(malId, episode, streamLinks);
+      await animeCacheRepository.cacheStreamingLinks(malId, episode, zoroStremingLinks);
       Logger.info(`Cached streaming links for ${animeName} episode ${episode}`, {
         timestamp: true,
         prefix: 'Stream Cache',
       });
     }
 
-    return streamLinks;
+    return zoroStremingLinks;
   } catch (error) {
     Logger.error(`Error fetching streaming links for ${animeName}: ${error}`, {
       timestamp: true,
       prefix: 'Anime Stream',
     });
-    return { sub: [], dub: [] };
+    return {
+      sub: {
+        intro: { start: 0, end: 0 },
+        outro: { start: 0, end: 0 },
+        sources: [],
+        captions: [],
+      },
+      dub: {
+        intro: { start: 0, end: 0 },
+        outro: { start: 0, end: 0 },
+        sources: [],
+        captions: [],
+      },
+    };
   }
 }

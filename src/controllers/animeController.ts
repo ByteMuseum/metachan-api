@@ -241,7 +241,7 @@ export const episodeStreamingLinks = async (req: Request, res: Response): Promis
   }
 
   const links = await getEpisodeStreamingLinks(title, episodeNumber, malId);
-  if (!links.sub.length && !links.dub.length) {
+  if (!links.sub.sources.length && !links.dub.sources.length) {
     res.status(404).json({ message: 'No streaming links found' });
     return;
   }

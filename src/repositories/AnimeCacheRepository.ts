@@ -2,7 +2,7 @@ import { BaseRepository } from './BaseRepository';
 import { AnimeCache } from '../entities/AnimeCache';
 import Logger from '../utils/logger';
 import { SingleAnime } from '../utils/anime';
-import { StreamLinks } from '../utils/stream';
+import { EpisodeStreamLinks } from '../utils/stream';
 
 export class AnimeCacheRepository extends BaseRepository<AnimeCache> {
   constructor() {
@@ -57,7 +57,10 @@ export class AnimeCacheRepository extends BaseRepository<AnimeCache> {
     }
   }
 
-  async getCachedStreamingLinks(malId: number, episodeNumber: number): Promise<StreamLinks | null> {
+  async getCachedStreamingLinks(
+    malId: number,
+    episodeNumber: number,
+  ): Promise<EpisodeStreamLinks | null> {
     try {
       const cache = await this.repository.findOne({
         where: { malId, episodeNumber, type: 'stream' },
@@ -67,7 +70,7 @@ export class AnimeCacheRepository extends BaseRepository<AnimeCache> {
         return null;
       }
 
-      return JSON.parse(cache.data) as StreamLinks;
+      return JSON.parse(cache.data) as EpisodeStreamLinks;
     } catch (error) {
       Logger.error(`Error retrieving streaming links from cache: ${error}`, {
         timestamp: true,
@@ -80,7 +83,7 @@ export class AnimeCacheRepository extends BaseRepository<AnimeCache> {
   async cacheStreamingLinks(
     malId: number,
     episodeNumber: number,
-    links: StreamLinks,
+    links: EpisodeStreamLinks,
     expiresInDays: number = 7,
   ): Promise<void> {
     try {

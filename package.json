@@ -24,6 +24,7 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.7",
+    "@types/string-similarity": "^4.0.2",
     "@typescript-eslint/eslint-plugin": "^8.20.0",
     "@typescript-eslint/parser": "^8.20.0",
     "eslint": "^9.18.0",
@@ -33,11 +34,13 @@
     "typescript": "^5.7.3"
   },
   "dependencies": {
+    "@consumet/extensions": "^1.8.1",
     "axios": "^1.7.9",
     "chalk": "^5.4.1",
     "express": "^4.21.2",
     "reflect-metadata": "^0.2.2",
     "sqlite3": "^5.1.7",
+    "string-similarity": "^4.0.4",
     "typeorm": "^0.3.20"
   }
 }
