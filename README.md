@@ -5,6 +5,50 @@ Welcome to **MetaChan**. MetaChan is an Anime and Manga metadata API that provid
 > [!WARNING]  
 > I _do not_ provide pre-hosted instances of the MetaChan API. You will need to host your own instance of the API to use it.
 
+## Build/Run Instructions
+
+You can either build a [Docker](https://www.docker.com/) image or run the API directly using [Node.js](https://nodejs.org/). The API uses a `sqlite` database to store, update, cache, and retrieve metadata. A [Dockerfile](./Dockerfile) is provided to build a Docker image.
+
+### Environment Variables
+
+Following environment variables should be configured before running the API:
+
+```bash
+NODE_ENV=production # or development. development enables debug logs.
+TVDB_API_KEY= # The TVDB API key.
+HEALTH_AUTH_TOKEN= # The health check endpoint authorization token. Configure this to secure the health check endpoint.
+CONSUMET_URL= # The URL to a self-hosted Consumet instance.
+```
+
+Information on the [Consumet API](https://docs.consumet.org/) can be found [here](https://docs.consumet.org/) or refer to the [`@consumet/extensions`](https://npmjs.com/package/@consumet/extensions) package.
+
+> [!NOTE]  
+> The dependency on the [Consumet API](https://docs.consumet.org/) might be removed in the future. The current API will work without it, but some information might be missing.
+
+### Docker
+
+To build a Docker image, run the following command:
+
+```bash
+docker build -t metachan .
+```
+
+To run the Docker image, run the following command:
+
+```bash
+docker run -d -p 3000:3000 --name metachan metachan
+```
+
+### Node.js
+
+To run the API using Node.js, run the following commands:
+
+```bash
+npm install
+npm run build
+npm start
+```
+
 ## API Documentation
 
 ### Health Check
