@@ -5,6 +5,9 @@ Welcome to **MetaChan**. MetaChan is an Anime and Manga metadata API that provid
 > [!WARNING]  
 > I _do not_ provide pre-hosted instances of the MetaChan API. You will need to host your own instance of the API to use it.
 
+> [!CAUTION]
+> The API is still under **heavy development** and the `main` branch contains breaking changes. A lot of features are still missing and the Documentation is not complete. There are *no releases* yet. If you still want to use the API, you can build it from the source code or use the Dockerfile provided.
+
 ## Build/Run Instructions
 
 You can either build a [Docker](https://www.docker.com/) image or run the API directly using [Node.js](https://nodejs.org/). The API uses a `sqlite` database to store, update, cache, and retrieve metadata. A [Dockerfile](./Dockerfile) is provided to build a Docker image.
@@ -174,7 +177,7 @@ npm start
   - `500 Internal Server Error`: Failure.
 - **Response Interface**: [`SingleAnime`](#SingleAnime)
 
-> [!CAUTION]
+> [!NOTE]
 > The [Get Anime via ID (AniList)](#get-anime-via-id-anilist) endpoint uses a reverse lookup to find the MAL ID for the given AniList ID. The response will be the same as the [Get Anime via ID (MAL)](#get-anime-via-id-mal) endpoint for the found MAL ID.
 
 ### Get Anime Episodes
