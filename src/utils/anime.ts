@@ -1,10 +1,17 @@
 import axios from 'axios';
 import { FribbMapping } from '../entities/FribbMapping';
 import Logger from './logger';
-import { TVDBClient, TVDBEpisode } from './tvdb';
+import { TVDBClient } from './tvdb';
 import { fribbMappingRepository } from '../repositories/FribbMappingRepository';
 import { getEpisodes } from './stream';
 import { animeCacheRepository } from '../repositories/AnimeCacheRepository';
+
+import { createTMDBMapper } from './tmdb';
+
+const tmdbMapper = createTMDBMapper({
+  apiKey: process.env.TMDB_API_KEY || '',
+  readAccessToken: process.env.TMDB_READ_ACCESS_TOKEN || '',
+});
 
 const tvdbClient = new TVDBClient({
   apiKey: process.env.TVDB_API_KEY || '',
@@ -237,6 +244,30 @@ interface KitsuAnime {
   };
 }
 
+interface MALSyncSite {
+  id?: number;
+  identifier: string;
+  image?: string;
+  malId: number;
+  aniId?: number;
+  page: string;
+  title: string;
+  type: string;
+  url: string;
+  external?: boolean;
+}
+
+interface MALSyncResponse {
+  id: number;
+  type: 'anime' | 'manga';
+  title: string;
+  url: string;
+  total: number;
+  image: string;
+  anidbId: number;
+  Sites: Record<string, Record<string, MALSyncSite>>;
+}
+
 interface MALCharacter {
   data: Array<{
     character: {
@@ -355,6 +386,7 @@ export interface SingleAnime {
     timezone: string;
     string: string;
   };
+  logos?: Record<string, string>;
   producers: Array<{
     id: number;
     name: string;
@@ -553,53 +585,12 @@ const getBasicMALInfo = async (malId: number): Promise<EmbeddedAnime | null> => 
   };
 };
 
-const mergeTVDBEpisodes = (
-  malEpisodes: AnimeEpisode[],
-  tvdbEpisodes: TVDBEpisode[],
-): AnimeEpisode[] => {
-  // Filter only main season episodes (not specials)
-  const mainEpisodes = tvdbEpisodes
-    .filter((ep) => ep.seasonNumber === 1 && ep.number && ep.number <= malEpisodes.length)
-    .sort((a, b) => a.number - b.number);
-
-  return malEpisodes.map((malEpisode, index) => {
-    const tvdbEpisode = mainEpisodes.find((ep) => ep.number === index + 1);
-
-    if (!tvdbEpisode) {
-      return malEpisode;
-    }
-
-    // Get English translation
-    const englishOverview =
-      tvdbEpisode.overviewTranslations?.find((t) => t.language === 'eng')?.overview || '';
-
-    // Get Japanese translation
-    const japaneseOverview =
-      tvdbEpisode.overviewTranslations?.find((t) => t.language === 'jpn')?.overview ||
-      tvdbEpisode.overview ||
-      '';
-
-    return {
-      ...malEpisode,
-      duration: tvdbEpisode.runtime ? `${tvdbEpisode.runtime} mins` : 'N/A',
-      synopsis: {
-        english: englishOverview,
-        japanese: japaneseOverview,
-      },
-      image: tvdbEpisode.image,
-      seasonNumber: tvdbEpisode.seasonNumber,
-      number: tvdbEpisode.number,
-    };
-  });
-};
-
-export const getBasicAnime = async (fribbMapping: FribbMapping): Promise<EmbeddedAnime | null> => {
-  const malAnime = await getBasicMALInfo(fribbMapping.mal_id);
-  if (!malAnime) {
-    return null;
-  }
-
-  return malAnime;
+const LOGO_SIZES = {
+  SMALL: 320,
+  MEDIUM: 480,
+  LARGE: 600,
+  XLARGE: 800,
+  ORIGINAL: 1200,
 };
 
 export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAnime | null> => {
@@ -639,31 +630,73 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
 
   const animeEpisodes = await getAnimeEpisodes(fribbMapping.mal_id);
 
-  let tvdbInfo = null;
   let episodes = animeEpisodes;
+  let tvdbInfo = await tvdbClient.getAnimeById(fribbMapping.thetvdb_id);
 
-  if (fribbMapping.thetvdb_id) {
-    tvdbInfo = await tvdbClient.getAnimeById(fribbMapping.thetvdb_id);
-    try {
-      const tvdbEpisodesResponse = await tvdbClient.getAnimeEpisodes(fribbMapping.thetvdb_id);
-      if (tvdbEpisodesResponse?.data?.episodes) {
-        episodes = mergeTVDBEpisodes(animeEpisodes, tvdbEpisodesResponse.data.episodes);
-      }
-    } catch (error) {
-      Logger.error(
-        `Failed to fetch TVDB episodes: ${error instanceof Error ? error.message : String(error)}`,
-        {
-          prefix: 'Anime',
-          timestamp: true,
-        },
-      );
-    }
-  }
+  // Add description to each episode
 
   const title =
     kitsuAnime.data.data[0].attributes.canonicalTitle ||
     kitsuAnime.data.data[0].attributes.titles.en ||
     kitsuAnime.data.data[0].attributes.titles.ja_jp;
+
+  try {
+    // Get all possible titles to try
+    const possibleTitles = [
+      title,
+      malAnime.data.data.title_english,
+      malAnime.data.data.title,
+      ...malAnime.data.data.title_synonyms,
+      ...malAnime.data.data.titles.map((t) => t.title),
+    ].filter((t): t is string => !!t);
+
+    // Try each title until we get a match
+    for (const currentTitle of possibleTitles) {
+      try {
+        const enrichedEpisodes = await tmdbMapper.enrichEpisodes(currentTitle, episodes, {
+          alternativeTitle: malAnime.data.data.title_english,
+          isAdult: malAnime.data.data.rating === 'R - 17+ (violence & profanity)',
+          countryPriority: 'JP',
+          maxYear: malAnime.data.data.year,
+          seasonNumber: tvdbInfo?.data?.seasons?.[0]?.number || 1,
+          airDate: malAnime.data.data.aired.from,
+          episodeCount: malAnime.data.data.episodes,
+        });
+
+        // If we got any synopses, use these episodes and break
+        if (
+          enrichedEpisodes.some(
+            (ep) => ep.synopsis?.english && ep.synopsis.english !== 'No synopsis available',
+          )
+        ) {
+          episodes = enrichedEpisodes;
+          Logger.info(`Successfully enriched episodes using title: ${currentTitle}`, {
+            prefix: 'Anime',
+            timestamp: true,
+          });
+          break;
+        }
+      } catch (titleError) {
+        Logger.warn(
+          `Failed to enrich episodes with title "${currentTitle}", trying next title... (${titleError instanceof Error ? titleError : 'Unknown error'})`,
+          {
+            prefix: 'Anime',
+            timestamp: true,
+          },
+        );
+        continue;
+      }
+    }
+  } catch (error) {
+    Logger.error(
+      `Failed to enrich episodes with TMDB data: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      {
+        prefix: 'Anime',
+        timestamp: true,
+      },
+    );
+  }
+
   const streamingEpisodes = await getEpisodes(title);
 
   if (
@@ -673,13 +706,14 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
     Logger.info(`Filling missing episodes for ${title}`, { prefix: 'Anime Episodes' });
     const remainingEpisodes = streamingEpisodes.sub.length - episodes.length;
     Logger.debug(`Missing episodes: ${remainingEpisodes}`, { prefix: 'Anime Episodes' });
+    let lastEpisodeId = episodes.length > 0 ? episodes[episodes.length - 1].id : 0;
     for (let i = 0; i < remainingEpisodes; i++) {
       episodes.push({
-        id: episodes.length + i + 1,
+        id: lastEpisodeId + 1,
         titles: {
-          romaji: 'Episode ' + (i + episodes.length + 1),
-          english: 'Episode ' + (i + episodes.length + 1),
-          japanese: 'エピソード ' + (i + episodes.length + 1),
+          romaji: 'Episode ' + (lastEpisodeId + 1),
+          english: 'Episode ' + (lastEpisodeId + 1),
+          japanese: 'エピソード ' + (lastEpisodeId + 1),
         },
         aired: 'Unknown',
         score: 0,
@@ -699,6 +733,8 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
           malAnime.data.data.images.jpg.image_url ??
           '',
       });
+
+      lastEpisodeId++;
     }
   }
 
@@ -734,6 +770,7 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
       japanese: kitsuAnime.data.data[0].attributes.titles.ja_jp,
       romaji: kitsuAnime.data.data[0].attributes.canonicalTitle,
     },
+    logos: undefined,
     synopsis: malAnime.data.data.synopsis
       .replace('\n\n[Written by MAL Rewrite]', '')
       .replace('\n[Written by MAL Rewrite]', ''),
@@ -803,16 +840,20 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
     },
     trailer: malAnime.data.data.trailer.url,
     seasons: seasons.sort((a, b) => {
-      const typeOrder: { [key: string]: number } = { TV: 1, Movie: 2, OVA: 3, Special: 4 };
-      const getTypeValue = (type: string) => typeOrder[type] || 5;
-
-      if (getTypeValue(a.type) !== getTypeValue(b.type)) {
-        return getTypeValue(a.type) - getTypeValue(b.type);
-      }
-
+      // Primary sort by chronological order using aired.from date
       const aDate = new Date(a.aired.from);
       const bDate = new Date(b.aired.from);
-      return aDate.getTime() - bDate.getTime();
+
+      // If both dates are valid, sort chronologically
+      if (!isNaN(aDate.getTime()) && !isNaN(bDate.getTime())) {
+        return aDate.getTime() - bDate.getTime();
+      }
+
+      // If either date is invalid, push it to the end
+      if (isNaN(aDate.getTime())) return 1;
+      if (isNaN(bDate.getTime())) return -1;
+
+      return 0;
     }),
     episodes: {
       counts: {
@@ -823,6 +864,75 @@ export const getFullAnime = async (fribbMapping: FribbMapping): Promise<SingleAn
     },
     characters,
   };
+
+  const malSyncResponse = await axios.get<MALSyncResponse>(
+    `https://api.malsync.moe/mal/anime/${fribbMapping.mal_id}`,
+  );
+
+  if (!malSyncResponse.data.Sites.Crunchyroll || !malSyncResponse.data.Sites.Crunchyroll[0]) {
+    Logger.error('Crunchyroll site not found in MALSync response', {
+      prefix: 'Anime',
+      timestamp: true,
+    });
+    Logger.debug(`MALSync response: ${JSON.stringify(malSyncResponse.data)}`, {
+      prefix: 'Anime',
+      timestamp: true,
+    });
+  } else {
+    const crUrl = malSyncResponse.data.Sites.Crunchyroll[0].url;
+
+    try {
+      let seriesId;
+
+      if (crUrl.includes('/series/')) {
+        // Direct series URL format
+        seriesId = crUrl.split('/series/')[1].split('/')[0];
+      } else {
+        // Get the slug
+        try {
+          const response = await fetch(crUrl, {
+            redirect: 'manual', // Don't follow redirects, just get the Location header
+          });
+
+          if (response.status === 301 || response.status === 302) {
+            const redirectUrl = response.headers.get('location');
+            if (redirectUrl && redirectUrl.includes('/series/')) {
+              seriesId = redirectUrl.split('/series/')[1].split('/')[0];
+            } else {
+              throw new Error('Redirect URL does not contain series ID');
+            }
+          } else {
+            throw new Error(`Unexpected status code: ${response.status}`);
+          }
+        } catch (error) {
+          throw new Error(`Failed to get redirect URL: ${error}`);
+        }
+      }
+
+      const logoUrls = Object.entries(LOGO_SIZES).reduce(
+        (acc, [size, width]) => {
+          acc[size] =
+            `https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=${width}/keyart/${seriesId}-title_logo-en-us`;
+          return acc;
+        },
+        {} as Record<string, string>,
+      );
+
+      animeResponse.logos = logoUrls;
+    } catch (error) {
+      Logger.error('Failed to extract Crunchyroll series ID', {
+        prefix: 'Anime',
+        timestamp: true,
+      });
+      Logger.debug(
+        `Crunchyroll URL: ${crUrl}. Error: ${error instanceof Error ? error.message : error}`,
+        {
+          prefix: 'Anime',
+          timestamp: true,
+        },
+      );
+    }
+  }
 
   const cacheExpiryDays = animeResponse.status === 'Finished Airing' ? 30 : 1;
   await animeCacheRepository.cacheAnime(fribbMapping.mal_id, animeResponse, cacheExpiryDays);
